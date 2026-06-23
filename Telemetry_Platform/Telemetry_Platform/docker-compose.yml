@@ -1,0 +1,106 @@
+x-python-base: &python-base
+  build: .
+  restart: unless-stopped
+  networks:
+    - qtp_network
+  environment:
+    - REDIS_HOST=redis
+    - REDIS_PORT=6379
+    - BOT_TOKEN=${BOT_TOKEN}
+    - ADMIN_ID=${ADMIN_ID}
+  depends_on:
+    redis:
+      condition: service_healthy
+
+services:
+  
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    command: redis-server --appendonly yes
+    restart: always
+    networks:
+      - qtp_network
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  
+  ingester_binance:
+    <<: *python-base
+    command: python ingester/binance_ws.py
+
+  ingester_bybit:
+    <<: *python-base
+    command: python ingester/bybit_ws.py
+
+  ingester_okx:
+    <<: *python-base
+    command: python ingester/okx_ws.py
+
+  ingester_bitget:
+    <<: *python-base
+    command: python ingester/bitget_ws.py
+
+  ingester_deribit:
+    <<: *python-base
+    command: python ingester/deribit_ws.py
+
+  ingester_hyperliquid:
+    <<: *python-base
+    command: python ingester/hyperliquid_ws.py
+
+  ingester_dydx:
+    <<: *python-base
+    command: python ingester/dydx_ws.py
+
+  ingester_htx:
+    <<: *python-base
+    command: python ingester/htx_ws.py
+
+  ingester_gate:
+    <<: *python-base
+    command: python ingester/gate_ws.py
+
+  
+  aggregator:
+    <<: *python-base
+    command: python aggregator/minute_builder.py
+
+  
+  comparator:
+    <<: *python-base
+    command: python comparator/trend_calculator.py
+
+  
+  api_server:
+    <<: *python-base
+    command: uvicorn api_server.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  
+  archiver:
+    <<: *python-base
+    command: python archiver/daily_snapshot.py
+
+  
+  telegram_bot:
+    <<: *python-base
+    command: python tg_bot/main.py
+
+networks:
+  qtp_network:
+    driver: bridge
+
+volumes:
+  redis_data:

@@ -1,0 +1,1794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Realtime Telemetry Platform</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        body { height: 100dvh; background-color: #0b0e14; color: #d1d4dc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; overflow: hidden; display: flex; flex-direction: column; }
+        
+        .tab-btn { border-bottom: 2px solid transparent; transition: all 0.2s; }
+        .tab-btn.active { border-bottom: 2px solid #2962FF; color: #ffffff; background-color: #1e222d; }
+        .chart-box { width: 100%; position: relative; }
+        .chart-box > div:not([id^="combined-heatmap"]):not([id^="combined-vol-profile"]):not(.qtp-watermark) { position: absolute !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; width: 100% !important; height: 100% !important; }
+
+        .qtp-watermark {
+            position: absolute; bottom: 15px; right: 15px;
+            font-family: 'Trebuchet MS', sans-serif; font-size: 100px; font-weight: bold;
+            color: #ffffff; opacity: 0.06; pointer-events: none; user-select: none; z-index: 40;
+       }
+        .neon-text { text-shadow: 0 0 10px rgba(41, 98, 255, 0.4); }
+        .tape-row { animation: slideIn 0.2s ease-out; border-left: 2px solid transparent; }
+        @keyframes slideIn { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }
+        .asset-container { display: none; width: 100%; animation: fadeIn 0.3s ease-in-out; }
+        .asset-container.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: #0b0e14; }
+        ::-webkit-scrollbar-thumb { background: #2a2e39; border-radius: 2px; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+
+        .metrics-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 32px; }
+        @media (min-width: 1024px) { .metrics-grid { grid-template-columns: repeat(4, 1fr); gap: 24px; margin-bottom: 40px; } }
+
+        .hero-panel { display: flex; flex-direction: column; gap: 15px; margin-bottom: 32px; padding: 24px; background: #131722; border: 1px solid #2a2e39; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .hero-panel > div { width: 100%; border-top: 1px solid #2a2e39; padding-top: 12px; }
+        .hero-panel > div:first-child { border-top: none; padding-top: 0; }
+        @media (min-width: 640px) {
+            .hero-panel { flex-direction: row; align-items: center; justify-content: space-between; gap: 0; }
+            .hero-panel > div { width: 25%; border-top: none; padding-top: 0; text-align: center; border-left: 1px solid #2a2e39; }
+            .hero-panel > div:first-child { text-align: left; border-left: none; }
+            .hero-panel > div:last-child { text-align: right; }
+        }
+
+        .layout-wrapper { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+        .layout-charts { flex: 1; overflow-y: auto; background: #0b0e14; transition: width 0.3s ease; -webkit-overflow-scrolling: touch; }
+        .layout-tape { height: 40%; display: flex; flex-direction: column; background: #131722; transition: all 0.3s ease; flex-shrink: 0; }
+        .layout-tape.collapsed { height: 0; border: none; overflow: hidden; }
+
+        .tape-toggle-btn {
+            display: flex; align-items: center; justify-content: center;
+            width: 100%; height: 44px; background: #1e222d; cursor: pointer;
+            border-top: 1px solid #2a2e39; border-bottom: 1px solid #2a2e39;
+            transition: background 0.2s, color 0.2s; color: #787b86; z-index: 50; flex-shrink: 0;
+        }
+        .tape-toggle-btn:hover { background: #2962FF; color: white; }
+        
+        #tape-arrow { transition: transform 0.3s ease; transform: rotate(90deg); width: 24px; height: 24px; }
+        .tape-collapsed #tape-arrow { transform: rotate(-90deg); }
+
+        body.fullscreen-active header,
+        body.fullscreen-active > div.z-50.relative,
+        body.fullscreen-active #tape-toggle,
+        body.fullscreen-active #tape-area { display: none !important; }
+        
+        body.fullscreen-active .layout-charts { padding: 0 !important; overflow: hidden !important; }
+
+        .fullscreen-mode {
+            position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+            z-index: 999999 !important; background-color: #0b0e14 !important; padding: 12px !important; margin: 0 !important;
+            border-radius: 0 !important; border: none !important; box-shadow: none !important; display: flex !important;
+            flex-direction: column !important; width: 100vw !important; height: 100dvh !important; max-width: 100vw !important; max-height: 100dvh !important; box-sizing: border-box !important;
+        }
+        @media (min-width: 640px) { .fullscreen-mode { padding: 32px !important; } }
+        
+        .fullscreen-mode > div:first-child { flex: 0 0 auto !important; margin-bottom: 12px !important; width: 100% !important; max-width: 100% !important; }
+        .fullscreen-mode .chart-box { flex: 1 1 0px !important; height: 100% !important; width: 100% !important; min-height: 0 !important; min-width: 0 !important; }
+
+        @media (min-width: 1024px) {
+            .layout-wrapper { flex-direction: row; }
+            .layout-charts { height: 100%; width: 75%; }
+            .layout-charts.expanded { width: 100%; }
+            .layout-tape { height: 100%; width: 25%; border-top: none; border-left: 1px solid #2a2e39; }
+            .layout-tape.collapsed { width: 0; border: none; overflow: hidden; }
+            .tape-toggle-btn { width: 24px; height: 100%; border-left: 1px solid #2a2e39; border-right: 1px solid #2a2e39; border-top: none; border-bottom: none; }
+            #tape-arrow { transform: rotate(0deg); width: 18px; height: 18px; }
+            .tape-collapsed #tape-arrow { transform: rotate(180deg); }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="auth-screen" class="absolute inset-0 z-[100] flex items-center justify-center bg-[#0b0e14] p-4">
+        <div class="bg-[#131722] border border-[#2a2e39] p-8 rounded-xl w-full max-w-md text-center shadow-2xl">
+            <h1 class="text-3xl font-bold text-white tracking-widest neon-text mb-6">Quantum Terminal Pro</h1>
+            <input type="text" id="api-key-input" placeholder="Enter License Key..." class="w-full bg-[#1e222d] border border-[#2a2e39] text-white px-4 py-3 rounded-lg mb-4 text-center font-mono outline-none focus:border-[#2962FF]">
+            <button onclick="startTerminal()" class="w-full bg-[#2962FF] hover:bg-blue-600 text-white font-bold py-3 rounded-lg uppercase tracking-wider transition-colors">Connect</button>
+        </div>
+    </div>
+
+    <header class="bg-[#131722] border-b border-[#2a2e39] p-3 flex justify-between items-center text-xs shrink-0 z-50 relative">
+        <h1 class="font-bold text-white tracking-widest neon-text">Quantum Terminal Pro</h1>
+        <div class="flex items-center gap-3">
+            <div id="sub-badge" class="hidden items-center bg-[#1e222d] border border-[#2a2e39] px-2 py-1 rounded text-[10px] font-bold tracking-wider">
+                <span id="sub-icon" class="mr-1"></span>
+                <span id="sub-label" class="text-white"></span>
+            </div>
+    
+            <div class="flex items-center gap-2 border-l border-[#2a2e39] pl-3">
+                <span id="status-dot" class="w-2 h-2 rounded-full bg-rose-500"></span>
+                <span id="status-text" class="font-bold text-rose-500 uppercase tracking-wider hidden sm:inline">OFFLINE</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex bg-[#131722] border-b border-[#2a2e39] px-2 sm:px-4 shrink-0 overflow-x-auto z-50 relative">
+        <button onclick="switchTab('BTC')" id="tab-BTC" class="tab-btn active px-4 sm:px-6 py-3 text-xs font-bold text-[#787b86] uppercase whitespace-nowrap">Bitcoin</button>
+        <button onclick="switchTab('ETH')" id="tab-ETH" class="tab-btn px-4 sm:px-6 py-3 text-xs font-bold text-[#787b86] uppercase whitespace-nowrap">Ethereum</button>
+    </div>
+
+    <main class="layout-wrapper">
+        <div id="main-charts-area" class="layout-charts relative p-4 sm:p-6 lg:p-10">
+            <div id="BTC-container" class="asset-container active"></div>
+            <div id="ETH-container" class="asset-container"></div>
+        </div>
+
+        <div id="tape-toggle" class="tape-toggle-btn" onclick="toggleTape()">
+            <svg id="tape-arrow" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 transform transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+            </svg>
+        </div>
+
+        <div id="tape-area" class="layout-tape font-mono text-[11px]">
+            <div class="p-2 sm:p-3 border-b border-[#2a2e39] bg-[#1e222d] font-bold text-white uppercase flex justify-between items-center shrink-0">
+                <span>Whale Tape</span>
+                <div class="flex gap-1">
+                    <button onclick="setTapeFilter(100000)" id="btn-filter-100k" class="px-2 py-1 text-[9px] bg-[#2962FF] text-white rounded transition-colors"> > 100k</button>
+                    <button onclick="setTapeFilter(500000)" id="btn-filter-500k" class="px-2 py-1 text-[9px] bg-[#131722] text-[#787b86] rounded border border-[#2a2e39] transition-colors"> > 500k</button>
+                    <button onclick="setTapeFilter(1000000)" id="btn-filter-1m" class="px-2 py-1 text-[9px] bg-[#131722] text-[#787b86] rounded border border-[#2a2e39] transition-colors"> > 1M</button>
+                </div>
+            </div>
+            <div id="live-tape" class="flex-grow overflow-y-auto p-1 sm:p-2 flex flex-col gap-1"></div>
+        </div>
+    </main>
+
+    <script>
+        let tapeVisible = true;
+        let wallsVisible = { BTC: false, ETH: false }; 
+        let lineMode = { BTC: false, ETH: false };
+        let activeWhales = { BTC: {}, ETH: {} };
+        let activeLiqMode = { BTC: 'GROSS', ETH: 'GROSS' }; 
+
+        function toggleFitContent(asset, chartName) {
+            const chart = chartsData[asset][chartName];
+            if (!chart) return;
+            if (!chartsData[asset].zoomStates) chartsData[asset].zoomStates = {};
+            if (!chartsData[asset].zoomStates[chartName]) {
+                chartsData[asset].zoomStates[chartName] = chart.timeScale().getVisibleLogicalRange();
+                chart.timeScale().fitContent();
+            } else {
+                chart.timeScale().setVisibleLogicalRange(chartsData[asset].zoomStates[chartName]);
+                chartsData[asset].zoomStates[chartName] = null;
+            }
+        }
+
+        function toggleFullscreen(wrapperId) {
+            const wrapper = document.getElementById(wrapperId);
+            if(wrapper) {
+                wrapper.style.transition = 'none';
+                const isExiting = wrapper.classList.contains('fullscreen-mode');
+                
+                if (isExiting) {
+                    wrapper.classList.remove('fullscreen-mode');
+                    document.body.classList.remove('fullscreen-active');
+                } else {
+                    wrapper.classList.add('fullscreen-mode');
+                    document.body.classList.add('fullscreen-active');
+                }
+                
+                setTimeout(() => { 
+                    window.dispatchEvent(new Event('resize')); 
+                    setTimeout(() => { wrapper.style.transition = ''; }, 50);
+                }, 10);
+            }
+        }
+
+        function getFitBtn(asset, chartName) {
+            return `<button onclick="toggleFitContent('${asset}', '${chartName}')" class="text-[#787b86] hover:text-[#2962FF] transition-colors ml-2" title="Toggle Fit to Screen"><svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 sm:h-4 sm:w-4 inline-block" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg></button>`;
+        }
+
+        function getExpandBtn(wrapperId) {
+            return '';
+        }
+
+        function toggleTape() {
+            tapeVisible = !tapeVisible;
+            const tapeArea = document.getElementById('tape-area');
+            const chartsArea = document.getElementById('main-charts-area');
+            const arrow = document.getElementById('tape-arrow');
+            
+            if (!tapeVisible) { tapeArea.classList.add('collapsed'); chartsArea.classList.add('expanded'); arrow.classList.add('rotate-180'); } 
+            else { tapeArea.classList.remove('collapsed'); chartsArea.classList.remove('expanded'); arrow.classList.remove('rotate-180'); }
+            setTimeout(() => { window.dispatchEvent(new Event('resize')); }, 300);
+        }
+
+        function toggleWalls(asset) {
+            wallsVisible[asset] = !wallsVisible[asset];
+            const btn = document.getElementById(`btn-toggle-walls-${asset}`);
+            if (btn) {
+                if (wallsVisible[asset]) {
+                    btn.className = "px-2 py-1 text-[9px] font-bold text-white bg-[#f23645] rounded transition-colors shadow-[0_0_5px_#f23645]";
+                    btn.textContent = "ORDERS: ON";
+                } else {
+                    btn.className = "px-2 py-1 text-[9px] font-bold text-[#787b86] bg-[#2a2e39] rounded transition-colors";
+                    btn.textContent = "ORDERS: OFF";
+                }
+            }
+            if (chartsData[asset] && chartsData[asset].whaleLines && !lineMode[asset]) {
+                Object.keys(chartsData[asset].whaleLines).forEach(key => {
+                    let lineObj = chartsData[asset].whaleLines[key];
+                    if (lineObj && activeWhales[asset] && activeWhales[asset][key]) {
+                        let data = activeWhales[asset][key];
+                        lineObj.applyOptions({ color: wallsVisible[asset] ? data.color : 'rgba(0,0,0,0)', title: wallsVisible[asset] ? data.title : '' });
+                    }
+                });
+            }
+        }
+
+        function toggleLineMode(asset) {
+            lineMode[asset] = !lineMode[asset];
+            const btn = document.getElementById(`btn-toggle-line-${asset}`);
+            if (lineMode[asset]) {
+                btn.textContent = "MODE: LINE";
+                btn.className = "px-2 py-1 text-[9px] font-bold text-white bg-[#2962FF] rounded transition-colors shadow-[0_0_5px_#2962FF]";
+                chartsData[asset].candleSeries.applyOptions({ visible: false });
+                chartsData[asset].emaSeries['50'].applyOptions({ visible: false });
+                chartsData[asset].emaSeries['200'].applyOptions({ visible: false });
+                chartsData[asset].emaSeries['800'].applyOptions({ visible: false });
+                chartsData[asset].simpleLineSeries.applyOptions({ visible: true });
+                Object.values(chartsData[asset].whaleLines).forEach(l => { if(l) l.applyOptions({color: 'rgba(0,0,0,0)', title: ''}); });
+            } else {
+                btn.textContent = "MODE: CANDLES";
+                btn.className = "px-2 py-1 text-[9px] font-bold text-[#787b86] bg-[#2a2e39] rounded transition-colors";
+                chartsData[asset].candleSeries.applyOptions({ visible: true });
+                
+                const p = activeEmaPeriod;
+                chartsData[asset].emaSeries['50'].applyOptions({ visible: p === '50' || p === 'ALL' });
+                chartsData[asset].emaSeries['200'].applyOptions({ visible: p === '200' || p === 'ALL' });
+                chartsData[asset].emaSeries['800'].applyOptions({ visible: p === '800' || p === 'ALL' });
+                chartsData[asset].simpleLineSeries.applyOptions({ visible: false });
+                
+                if(wallsVisible[asset]) {
+                    Object.keys(chartsData[asset].whaleLines).forEach(key => {
+                        let lineObj = chartsData[asset].whaleLines[key];
+                        if(lineObj && activeWhales[asset][key]) {
+                            let data = activeWhales[asset][key];
+                            lineObj.applyOptions({color: data.color, title: data.title});
+                        }
+                    });
+                }
+            }
+        }
+
+        
+        function toggleLiqMode(asset, mode) {
+            activeLiqMode[asset] = mode;
+            document.getElementById(`btn-liq-GROSS-${asset}`).className = mode === 'GROSS' ? "px-2 py-0.5 text-[9px] font-bold text-[#f8a13f] bg-[#2a2e39] rounded shadow-[0_0_5px_#f8a13f]" : "px-2 py-0.5 text-[9px] font-bold text-[#787b86] rounded";
+            document.getElementById(`btn-liq-NET-${asset}`).className = mode === 'NET' ? "px-2 py-0.5 text-[9px] font-bold text-[#f8a13f] bg-[#2a2e39] rounded shadow-[0_0_5px_#f8a13f]" : "px-2 py-0.5 text-[9px] font-bold text-[#787b86] rounded";
+
+            if (chartsData[asset] && chartsData[asset].grossShortSeries) {
+                chartsData[asset].grossShortSeries.applyOptions({ visible: mode === 'GROSS' });
+                chartsData[asset].grossLongSeries.applyOptions({ visible: mode === 'GROSS' });
+                chartsData[asset].netLiqSeries.applyOptions({ visible: mode === 'NET' });
+            }
+        }
+
+        const formatMoney = (v) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v);
+        const formatCompact = (v) => {
+            if (v === undefined || v === null) return "0";
+            const absVal = Math.abs(v);
+            const sign = v < 0 ? "-" : "";
+            if (absVal >= 1.0e+9) return sign + (absVal / 1.0e+9).toFixed(2) + "B";
+            else if (absVal >= 1.0e+6) return sign + (absVal / 1.0e+6).toFixed(1) + "M";
+            else if (absVal >= 1.0e+3) return sign + (absVal / 1.0e+3).toFixed(1) + "K";
+            return sign + absVal.toFixed(0);
+        };
+        const host = window.location.host;
+        const WS_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${host}/ws/market_data`;
+        const API_URL = `${window.location.protocol === 'https:' ? 'https' : 'http'}://${host}/api/history/`;
+
+        const chartsData = { BTC: {}, ETH: {} };
+        let lastChartTime = { BTC: 0, ETH: 0 };
+        const lastWsCVD = { BTC: null, ETH: null };
+        let activeWS = null;
+        let reconnectTimeout = null;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT_ATTEMPTS = 12;
+        let currentAsset = 'BTC';
+        const EXCHANGES = ['GLOBAL', 'BINANCE', 'BYBIT', 'OKX', 'HYPERLIQUID', 'DYDX', 'BITGET', 'DERIBIT', 'HTX', 'GATE'];
+        
+        let activeEmaPeriod = '800'; 
+        let activeGlobalExchange = 'GLOBAL';
+        let activeCVDSession = '24H';
+        let activeVolMode = 'TOTAL';
+
+        function setEmaPeriod(period) {
+            activeEmaPeriod = period;
+            ['BTC', 'ETH'].forEach(asset => {
+                ['50', '200', '800', 'ALL'].forEach(p => {
+                    const btn = document.getElementById(`btn-ema-${p}-${asset}`);
+                    if (btn) btn.className = p === period ? "ema-btn px-2 py-0.5 text-[9px] font-bold text-[#f8a13f] bg-[#2a2e39] rounded transition-colors" : "ema-btn px-2 py-0.5 text-[9px] font-bold text-[#787b86] rounded transition-colors";
+                });
+                if (chartsData[asset] && chartsData[asset].emaSeries && !lineMode[asset]) {
+                    chartsData[asset].emaSeries['50'].applyOptions({ visible: period === '50' || period === 'ALL' });
+                    chartsData[asset].emaSeries['200'].applyOptions({ visible: period === '200' || period === 'ALL' });
+                    chartsData[asset].emaSeries['800'].applyOptions({ visible: period === '800' || period === 'ALL' });
+                }
+            });
+        }
+
+        function setGlobalExchange(ex) {
+            activeGlobalExchange = ex;
+            ['BTC', 'ETH'].forEach(asset => {
+                EXCHANGES.forEach(e => {
+                    const btn = document.getElementById(`btn-global-${e}-${asset}`);
+                    if (btn) btn.className = e === ex ? `px-4 py-2 text-[10px] font-bold text-[#f8a13f] bg-[#2a2e39] rounded whitespace-nowrap shadow-md` : `px-4 py-2 text-[10px] font-bold text-[#787b86] hover:bg-[#1e222d] rounded whitespace-nowrap transition-colors`;
+                });
+
+                if (chartsData[asset]) {
+                    if (chartsData[asset].allOI && chartsData[asset].allOI[ex]) chartsData[asset].oiSeries.setData(chartsData[asset].allOI[ex]);
+                    if (chartsData[asset].allOIDelta && chartsData[asset].allOIDelta[ex]) chartsData[asset].oiDeltaSeries.setData(chartsData[asset].allOIDelta[ex]);
+                    if (chartsData[asset].allFund && chartsData[asset].allFund[ex]) chartsData[asset].fundSeries.setData(chartsData[asset].allFund[ex]);
+                    if (chartsData[asset].allCVD && chartsData[asset].allCVD[ex]) chartsData[asset].cvdSeries.setData(chartsData[asset].allCVD[ex][activeCVDSession] || chartsData[asset].allCVD[ex]['24H']);
+                    if (chartsData[asset].allVol && chartsData[asset].allVol[ex]) chartsData[asset].volSeries.setData(chartsData[asset].allVol[ex][activeCVDSession][activeVolMode] || chartsData[asset].allVol[ex]['24H']['TOTAL']);
+                    if (chartsData[asset].allDiv && chartsData[asset].allDiv[ex]) chartsData[asset].divSeries.setData(chartsData[asset].allDiv[ex][activeCVDSession] || chartsData[asset].allDiv[ex]['24H']);
+                }
+            });
+        }
+
+        function setCVDSession(ses) {
+            activeCVDSession = ses;
+            ['BTC', 'ETH'].forEach(asset => {
+                ['24H', 'ASIA', 'EU', 'US'].forEach(s => {
+                    const btn = document.getElementById(`btn-cvdses-${s}-${asset}`);
+                    if (btn) btn.className = s === ses ? `px-3 py-1.5 text-[9px] font-bold text-[#f8a13f] bg-[#2a2e39] rounded whitespace-nowrap` : `px-3 py-1.5 text-[9px] font-bold text-[#787b86] rounded whitespace-nowrap`;
+                });
+                
+                if (chartsData[asset] && chartsData[asset].allCVD && chartsData[asset].allCVD[activeGlobalExchange]) {
+                    chartsData[asset].cvdSeries.setData(chartsData[asset].allCVD[activeGlobalExchange][ses] || chartsData[asset].allCVD[activeGlobalExchange]['24H']);
+                    if (chartsData[asset].allVol && chartsData[asset].allVol[activeGlobalExchange][ses]) chartsData[asset].volSeries.setData(chartsData[asset].allVol[activeGlobalExchange][ses][activeVolMode]);
+                    if (chartsData[asset].allDiv && chartsData[asset].allDiv[activeGlobalExchange][ses]) chartsData[asset].divSeries.setData(chartsData[asset].allDiv[activeGlobalExchange][ses]);
+                }
+            });
+        }
+
+        function setVolMode(mode) {
+            activeVolMode = mode;
+            ['BTC', 'ETH'].forEach(asset => {
+                ['TOTAL', 'DELTA'].forEach(m => {
+                    const btn = document.getElementById(`btn-volmode-${m}-${asset}`);
+                    if (btn) btn.className = m === mode ? `px-3 py-1.5 text-[9px] font-bold text-[#f8a13f] bg-[#2a2e39] rounded whitespace-nowrap` : `px-3 py-1.5 text-[9px] font-bold text-[#787b86] rounded whitespace-nowrap`;
+                });
+                if (chartsData[asset] && chartsData[asset].allVol && chartsData[asset].allVol[activeGlobalExchange]) {
+                    chartsData[asset].volSeries.setData(chartsData[asset].allVol[activeGlobalExchange][activeCVDSession][mode] || chartsData[asset].allVol[activeGlobalExchange]['24H']['TOTAL']);
+                }
+            });
+        }
+
+        let minTapeValue = 100000;
+        function setTapeFilter(val) {
+            minTapeValue = val;
+            document.getElementById('btn-filter-100k').className = val === 100000 ? "px-2 py-1 text-[9px] bg-[#2962FF] text-white rounded" : "px-2 py-1 text-[9px] bg-[#131722] text-[#787b86] rounded border border-[#2a2e39]";
+            document.getElementById('btn-filter-500k').className = val === 500000 ? "px-2 py-1 text-[9px] bg-[#2962FF] text-white rounded" : "px-2 py-1 text-[9px] bg-[#131722] text-[#787b86] rounded border border-[#2a2e39]";
+            document.getElementById('btn-filter-1m').className = val === 1000000 ? "px-2 py-1 text-[9px] bg-[#2962FF] text-white rounded" : "px-2 py-1 text-[9px] bg-[#131722] text-[#787b86] rounded border border-[#2a2e39]";
+            document.getElementById('live-tape').innerHTML = '';
+        }
+
+        function switchTab(asset) {
+            currentAsset = asset;
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.asset-container').forEach(c => c.classList.remove('active'));
+            document.getElementById(`tab-${asset}`).classList.add('active');
+            document.getElementById(`${asset}-container`).classList.add('active');
+            document.getElementById('live-tape').innerHTML = '';
+            setTimeout(() => { window.dispatchEvent(new Event('resize')); }, 50);
+        }
+
+        function getOBHtml(asset, suffix, label) {
+            return `
+            <div class="mb-4">
+                <div class="flex justify-between items-center mb-1">
+                    <p class="text-[9px] font-bold text-[#22ab94] uppercase bg-[#1e222d] px-1.5 py-0.5 rounded">Bids</p>
+                    <p class="text-[9px] sm:text-[10px] text-[#787b86] uppercase tracking-wider font-bold">${label}</p>
+                    <p class="text-[9px] font-bold text-[#f23645] uppercase bg-[#1e222d] px-1.5 py-0.5 rounded">Asks</p>
+                </div>
+                <div class="w-full h-2 sm:h-2.5 bg-[#f23645] rounded-full overflow-hidden flex shadow-inner mb-1 relative">
+                    <div class="absolute left-1/2 top-0 bottom-0 w-[2px] bg-[#0b0e14] z-10"></div>
+                    <div id="${asset}-ob-bar-${suffix}" class="h-full bg-[#22ab94] transition-all duration-300" style="width: 50%"></div>
+                </div>
+                <div class="flex justify-between text-[10px] sm:text-[11px] font-mono">
+                    <span id="${asset}-bids-txt-${suffix}" class="text-[#22ab94]">$0</span>
+                    <span id="${asset}-imb-txt-${suffix}" class="text-white font-bold bg-[#1e222d] px-1 sm:px-2 rounded">$0</span>
+                    <span id="${asset}-asks-txt-${suffix}" class="text-[#f23645]">$0</span>
+                </div>
+            </div>`;
+        }
+
+        
+        if (!window.volTooltipState) {
+            window.volTooltipState = { 
+                BTC: { priceId: null, pinned: false, data: null }, 
+                ETH: { priceId: null, pinned: false, data: null } 
+            };
+            
+            window.handleVolHover = function(asset, priceId, isPoc, priceStr, buyStr, sellStr, totalStr) {
+                const state = window.volTooltipState[asset];
+                if (state.pinned) return; 
+                state.priceId = priceId;
+                state.data = { isPoc, priceStr, buyStr, sellStr, totalStr };
+                window.renderVolTooltipDOM(asset);
+            };
+
+            window.handleVolLeave = function(asset) {
+                const state = window.volTooltipState[asset];
+                if (state.pinned) return;
+                state.priceId = null;
+                state.data = null;
+                window.renderVolTooltipDOM(asset);
+            };
+
+            window.handleVolClick = function(asset, priceId, isPoc, priceStr, buyStr, sellStr, totalStr) {
+                const state = window.volTooltipState[asset];
+                
+                if (state.pinned && state.priceId === priceId) {
+                    state.pinned = false;
+                    state.priceId = null;
+                    state.data = null;
+                } else {
+                    
+                    state.pinned = true;
+                    state.priceId = priceId;
+                    state.data = { isPoc, priceStr, buyStr, sellStr, totalStr };
+                }
+                window.renderVolTooltipDOM(asset);
+            };
+
+            window.renderVolTooltipDOM = function(asset) {
+                const tt = document.getElementById(`vol-tt-${asset}`);
+                if (!tt) return;
+                const state = window.volTooltipState[asset];
+                if (state.data && state.priceId !== null) {
+                    const d = state.data;
+                    const pocHtml = d.isPoc 
+                        ? '<span class="text-[#D500F9] font-bold text-xs">🎯 POC (Point of Control)</span>' 
+                        : '<span class="text-[#787b86] font-bold text-xs">Volume Node</span>';
+                    
+                    tt.innerHTML = `
+                        ${pocHtml}<br>
+                        <div class="my-1.5 h-[1px] bg-[#2a2e39] w-full"></div>
+                        <div class="flex justify-between w-full gap-4"><span class="text-[#787b86]">Price:</span> <span>~${d.priceStr}</span></div>
+                        <div class="flex justify-between w-full gap-4"><span class="text-[#22ab94]">Buy:</span> <span>$${d.buyStr}</span></div>
+                        <div class="flex justify-between w-full gap-4"><span class="text-[#f23645]">Sell:</span> <span>$${d.sellStr}</span></div>
+                        <div class="border-t border-[#2a2e39] mt-1.5 pt-1.5 flex justify-between w-full gap-4">
+                            <span class="text-white font-bold">Total:</span> <span class="text-white font-bold">$${d.totalStr}</span>
+                        </div>
+                        ${state.pinned ? '<div class="text-[9px] text-[#FFD700] mt-1.5 bg-[#FFD700]/10 py-0.5 rounded animate-pulse border border-[#FFD700]/30">📌 Pinned (Click to unpin)</div>' : ''}
+                    `;
+                    tt.classList.remove('hidden');
+                    if (state.pinned) {
+                        tt.classList.add('border-[#FFD700]');
+                        tt.classList.remove('border-[#2a2e39]');
+                    } else {
+                        tt.classList.remove('border-[#FFD700]');
+                        tt.classList.add('border-[#2a2e39]');
+                    }
+                } else {
+                    tt.classList.add('hidden');
+                }
+            };
+        }
+
+        function renderVolumeProfile(asset, profileData, currentPrice) {
+            const container = document.getElementById(`combined-vol-profile-${asset}`);
+            if(!container) return;
+
+            container.className = "w-full flex-1 flex min-h-0 relative bg-[#0b0e14]/50 border border-[#2a2e39] rounded shadow-inner overflow-hidden";
+
+            const rangeMin = currentPrice * 0.95;
+            const rangeMax = currentPrice * 1.05;
+            
+            let maxVol = 1; 
+            let totalBuy = 0; 
+            let totalSell = 0; 
+
+            
+            const numBins = 20; 
+            const visualBinSize = (rangeMax - rangeMin) / numBins;
+            const visualBins = {};
+
+            if (profileData) {
+                Object.entries(profileData).forEach(([priceStr, vols]) => {
+                    const price = parseFloat(priceStr);
+                    if (price >= rangeMin && price <= rangeMax) {
+                        const binIdx = Math.floor((price - rangeMin) / visualBinSize);
+                        if (!visualBins[binIdx]) {
+                            visualBins[binIdx] = { 
+                                price: rangeMin + (binIdx + 0.5) * visualBinSize, 
+                                buyVol: 0, 
+                                sellVol: 0, 
+                                totalBinVol: 0 
+                            };
+                        }
+                        visualBins[binIdx].buyVol += vols.buy || 0;
+                        visualBins[binIdx].sellVol += vols.sell || 0;
+                        visualBins[binIdx].totalBinVol += (vols.buy || 0) + (vols.sell || 0);
+                        
+                        totalBuy += vols.buy || 0;
+                        totalSell += vols.sell || 0;
+                    }
+                });
+            }
+
+            const bins = Object.values(visualBins);
+            bins.forEach(b => { if (b.totalBinVol > maxVol) maxVol = b.totalBinVol; });
+
+            if (bins.length === 0) {
+                container.innerHTML = '<div class="h-full w-full flex items-center justify-center"><p class="text-[10px] text-[#787b86] italic animate-pulse">Building Volume Profile...</p></div>';
+                return;
+            }
+
+            let html = '';
+            
+            
+            html += `<div id="vol-tt-${asset}" class="hidden absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-[#1e222d]/95 backdrop-blur-md border text-white text-[11px] p-3 rounded-lg shadow-[0_0_30px_rgba(0,0,0,0.8)] z-[100] pointer-events-none min-w-[150px] text-center transition-colors duration-200"></div>`;
+
+            
+            const currentBottomPct = ((currentPrice - rangeMin) / (rangeMax - rangeMin)) * 100;
+            html += `<div class="absolute left-0 right-0 z-30 pointer-events-none" style="bottom: ${currentBottomPct}%; height: 1px; background-color: #FFD700; box-shadow: 0 0 10px #FFD700; opacity: 0.8;"></div>`;
+
+            
+            html += `
+                <div class="absolute right-1 top-1 text-[9px] text-[#22ab94] font-mono bg-[#0b0e14]/80 px-1 rounded border border-[#2a2e39] z-40 pointer-events-none">${formatMoney(rangeMax)}</div>
+                <div class="absolute right-1 bottom-1 text-[9px] text-[#f23645] font-mono bg-[#0b0e14]/80 px-1 rounded border border-[#2a2e39] z-40 pointer-events-none">${formatMoney(rangeMin)}</div>
+                <div class="absolute right-1 text-[10px] text-[#FFD700] font-bold font-mono bg-[#0b0e14]/90 px-1 rounded border border-[#FFD700] z-40 pointer-events-none" style="bottom: ${currentBottomPct}%; transform: translateY(50%);">${formatMoney(currentPrice)}</div>
+            `;
+
+            const binPct = 100 / numBins;
+            const barHeightCss = `calc(${binPct}% - 2px)`;
+            
+            
+            const state = window.volTooltipState[asset];
+
+            bins.forEach(bin => {
+                const bottomPct = ((bin.price - rangeMin) / (rangeMax - rangeMin)) * 100;
+                const bottomPos = bottomPct - (binPct / 2);
+                
+                const widthPct = Math.max(0.5, (bin.totalBinVol / maxVol) * 85); 
+                const buyWidthPct = (bin.buyVol / bin.totalBinVol) * 100;
+                const sellWidthPct = (bin.sellVol / bin.totalBinVol) * 100;
+                const isPoc = bin.totalBinVol === maxVol;
+                
+                const priceStr = formatMoney(bin.price);
+                const buyStr = formatCompact(bin.buyVol);
+                const sellStr = formatCompact(bin.sellVol);
+                const totalStr = formatCompact(bin.totalBinVol);
+
+                
+                if (state.priceId === bin.price) {
+                    state.data = { isPoc, priceStr, buyStr, sellStr, totalStr };
+                }
+                
+                const pocStyle = isPoc ? 'shadow-[0_0_15px_#D500F9] z-20 border-y border-r border-[#D500F9]' : 'z-10';
+
+                html += `
+                    <div class="absolute left-0 flex items-center justify-start group cursor-crosshair hover:z-50 ${pocStyle}" 
+                         style="bottom: ${bottomPos}%; height: ${barHeightCss}; width: ${widthPct}%;"
+                         onmouseenter="handleVolHover('${asset}', ${bin.price}, ${isPoc}, '${priceStr}', '${buyStr}', '${sellStr}', '${totalStr}')"
+                         onmouseleave="handleVolLeave('${asset}')"
+                         onclick="handleVolClick('${asset}', ${bin.price}, ${isPoc}, '${priceStr}', '${buyStr}', '${sellStr}', '${totalStr}')">
+                        
+                        <div class="h-full bg-[#22ab94] opacity-80 group-hover:opacity-100 group-hover:bg-white transition-all" style="width: ${buyWidthPct}%;"></div>
+                        <div class="h-full bg-[#f23645] opacity-80 group-hover:opacity-100 group-hover:bg-white transition-all rounded-r-[2px]" style="width: ${sellWidthPct}%;"></div>
+                    </div>
+                `;
+            });
+            
+            
+            const deltaVol = totalBuy - totalSell;
+            const deltaColor = deltaVol >= 0 ? 'text-[#22ab94]' : 'text-[#f23645]';
+            html += `
+                <div class="absolute top-3 left-1/2 transform -translate-x-1/2 flex gap-3 z-40 pointer-events-none">
+                    <div class="bg-[#1e222d]/95 backdrop-blur-sm border border-[#2a2e39] px-3 py-1.5 rounded text-xs font-mono shadow-md text-white">
+                        <span class="text-[#787b86] mr-1">VOL:</span>$${formatCompact(totalBuy + totalSell)}
+                    </div>
+                    <div class="bg-[#1e222d]/95 backdrop-blur-sm border border-[#2a2e39] px-3 py-1.5 rounded text-xs font-mono shadow-md text-white">
+                        <span class="text-[#787b86] mr-1">Delta:</span><span class="${deltaColor} font-bold">${deltaVol > 0 ? '+' : ''}$${formatCompact(deltaVol)}</span>
+                    </div>
+                </div>
+            `;
+
+            container.innerHTML = html;
+            
+            
+            window.renderVolTooltipDOM(asset);
+        }
+
+        
+        if (!window.heatmapTooltipState) {
+            window.heatmapTooltipState = { BTC: { id: null, pinned: false }, ETH: { id: null, pinned: false } };
+            
+            window.handleHmClick = function(asset, id) {
+                const state = window.heatmapTooltipState[asset];
+                if (state.pinned && state.id === id) {
+                    state.pinned = false;
+                    state.id = null;
+                } else {
+                    state.pinned = true;
+                    state.id = id;
+                }
+                
+                
+                document.querySelectorAll(`.hm-tt-${asset}`).forEach(el => {
+                    const isWall = el.getAttribute('data-is-wall') === 'true';
+                    if (!isWall) {
+                        el.classList.remove('!block', 'border-[#FFD700]', 'z-[200]');
+                        el.classList.add('hidden', 'group-hover:block', 'border-[#2a2e39]', 'z-[100]');
+                    } else {
+                        const wBorder = el.getAttribute('data-wall-border');
+                        el.classList.remove('border-[#FFD700]', 'z-[200]');
+                        el.classList.add('!block', wBorder, 'z-[150]');
+                    }
+                    const badge = el.querySelector('.hm-pinned-text');
+                    if (badge) badge.remove();
+                });
+                
+                if (state.pinned) {
+                    const tt = document.getElementById(`hm-tt-${asset}-${id}`);
+                    if (tt) {
+                        tt.classList.remove('hidden', 'group-hover:block', 'border-[#2a2e39]', 'z-[100]');
+                        const isWall = tt.getAttribute('data-is-wall') === 'true';
+                        if (isWall) {
+                            const wBorder = tt.getAttribute('data-wall-border');
+                            tt.classList.remove(wBorder, 'z-[150]');
+                        }
+                        tt.classList.add('!block', 'border-[#FFD700]', 'z-[200]');
+                        tt.insertAdjacentHTML('beforeend', '<div class="hm-pinned-text text-[9px] text-[#FFD700] mt-1.5 bg-[#FFD700]/10 py-0.5 rounded animate-pulse border border-[#FFD700]/30 text-center">📌 Pinned</div>');
+                    }
+                }
+            };
+        }
+
+        function renderRealHeatmap(asset, heatmapData, currentPrice, liveObj) {
+            const container = document.getElementById(`combined-heatmap-${asset}`);
+            if(!container) return;
+
+            const rangeMin = currentPrice * 0.95;
+            const rangeMax = currentPrice * 1.05;
+
+            let allItems = [];
+            const numBins = asset === 'BTC' ? 100 : 45; 
+            const binSize = (rangeMax - rangeMin) / numBins;
+            let shortsBins = {}; let longsBins = {};
+            
+            let totalShortLiq = 0;
+            let totalLongLiq = 0;
+
+            if (heatmapData && heatmapData.shorts) {
+                Object.entries(heatmapData.shorts).forEach(([p, v]) => {
+                    let price = parseFloat(p); let vol = parseFloat(v);
+                    totalShortLiq += vol;
+                    if(price > currentPrice && price <= rangeMax) {
+                        let binIdx = Math.floor((price - rangeMin) / binSize);
+                        shortsBins[binIdx] = (shortsBins[binIdx] || 0) + vol;
+                    }
+                });
+            }
+            if (heatmapData && heatmapData.longs) {
+                Object.entries(heatmapData.longs).forEach(([p, v]) => {
+                    let price = parseFloat(p); let vol = parseFloat(v);
+                    totalLongLiq += vol;
+                    if(price >= rangeMin && price < currentPrice) {
+                        let binIdx = Math.floor((price - rangeMin) / binSize);
+                        longsBins[binIdx] = (longsBins[binIdx] || 0) + vol;
+                    }
+                });
+            }
+
+            for (let i = 0; i < numBins; i++) {
+                let centerPrice = rangeMin + (i + 0.5) * binSize;
+                if (shortsBins[i] > 0) allItems.push({ price: centerPrice, vol: shortsBins[i], color: 'bg-[#22ab94]', direction: 'up', type: 'Short Liq Cluster', isBin: true });
+                if (longsBins[i] > 0) allItems.push({ price: centerPrice, vol: longsBins[i], color: 'bg-[#f23645]', direction: 'down', type: 'Long Liq Cluster', isBin: true });
+            }
+
+            if (liveObj) {
+                ['close', 'mid', 'macro'].forEach(zone => {
+                    let pAsk = liveObj[`whale_${zone}_ask_price`]; let vAsk = liveObj[`whale_${zone}_ask_vol`];
+                    if (pAsk && pAsk >= rangeMin && pAsk <= rangeMax && vAsk >= 50000000) {
+                        allItems.push({ price: pAsk, vol: vAsk, color: 'bg-[#f23645]', direction: 'down', type: 'Ask Wall', isWall: true });
+                    }
+                    
+                    let pBid = liveObj[`whale_${zone}_bid_price`]; let vBid = liveObj[`whale_${zone}_bid_vol`];
+                    if (pBid && pBid >= rangeMin && pBid <= rangeMax && vBid >= 50000000) {
+                        allItems.push({ price: pBid, vol: vBid, color: 'bg-[#22ab94]', direction: 'up', type: 'Bid Wall', isWall: true });
+                    }
+                });
+            }
+
+            let combinedHtml = '';
+            if (allItems.length > 0) {
+                const maxVol = Math.max(...allItems.map(i => i.vol), 1);
+                
+                combinedHtml = `<div class="relative h-full min-h-[192px] sm:min-h-[256px] w-full mt-2 bg-[#0b0e14]/50 overflow-hidden shadow-inner border border-[#2a2e39] rounded flex-1">`;
+                
+                combinedHtml += `<div class="absolute top-1/2 left-0 w-full h-[1px] bg-[#787b86] opacity-30 z-0"></div>`;
+                
+                combinedHtml += `
+                    <div class="absolute right-1 top-1 text-[9px] text-[#787b86] font-mono bg-[#0b0e14]/80 px-1 rounded border border-[#2a2e39] z-20">${formatCompact(maxVol)}</div>
+                    <div class="absolute right-1 top-1/2 -translate-y-1/2 text-[9px] text-[#787b86] font-mono bg-[#0b0e14]/80 px-1 rounded border border-[#2a2e39] z-20">0</div>
+                    <div class="absolute right-1 bottom-1 text-[9px] text-[#787b86] font-mono bg-[#0b0e14]/80 px-1 rounded border border-[#2a2e39] z-20">${formatCompact(maxVol)}</div>
+                `;
+
+                combinedHtml += `
+                    <div class="absolute top-3 left-1/4 transform -translate-x-1/2 bg-[#1e222d]/90 backdrop-blur-sm border border-[#2a2e39] px-4 py-2 rounded-lg shadow-lg z-30 pointer-events-none text-center">
+                        <span class="block text-[9px] text-[#787b86] font-bold mb-0.5 uppercase tracking-wider">LONG LIQ (Sum)</span>
+                        <span class="text-sm font-bold text-[#f23645]">$${formatCompact(totalLongLiq)}</span>
+                    </div>
+                    <div class="absolute top-3 right-1/4 transform translate-x-1/2 bg-[#1e222d]/90 backdrop-blur-sm border border-[#2a2e39] px-4 py-2 rounded-lg shadow-lg z-30 pointer-events-none text-center">
+                        <span class="block text-[9px] text-[#787b86] font-bold mb-0.5 uppercase tracking-wider">SHORT LIQ (Sum)</span>
+                        <span class="text-sm font-bold text-[#22ab94]">$${formatCompact(totalShortLiq)}</span>
+                    </div>
+                `;
+
+                const state = window.heatmapTooltipState[asset];
+
+                allItems.forEach(item => {
+                    const leftPct = ((item.price - rangeMin) / (rangeMax - rangeMin)) * 100;
+                    const heightPct = Math.max(1, (item.vol / maxVol) * 45); 
+                    const isUp = item.direction === 'up';
+                    const positionCss = isUp ? `bottom: 50%; height: ${heightPct}%;` : `top: 50%; height: ${heightPct}%;`;
+                    const shadowColor = item.color === 'bg-[#22ab94]' ? '#22ab94' : '#f23645';
+                    const borderColor = item.color.replace('bg-', 'border-');
+                    const textColor = item.color.replace('bg-', 'text-');
+                    const roundedClass = isUp ? 'rounded-t-[2px]' : 'rounded-b-[2px]';
+                    const tooltipPosition = isUp ? 'top-full mt-3' : 'bottom-full mb-3';
+                    const flexAlign = isUp ? 'justify-end' : 'justify-start';
+
+                    let tooltipHorizontalClass = "left-1/2 -translate-x-1/2";
+                    if (leftPct < 20) tooltipHorizontalClass = "left-0 transform-none";
+                    else if (leftPct > 80) tooltipHorizontalClass = "right-0 left-auto transform-none";
+                    
+                    let wallMarker = ''; let parentWidthStyle = ''; let fillClasses = '';
+                    if (item.isWall) {
+                        const wallShadow = item.color === 'bg-[#22ab94]' ? 'shadow-[0_0_20px_5px_#22ab94]' : 'shadow-[0_0_20px_5px_#f23645]';
+                        wallMarker = isUp 
+                            ? `<div class="absolute bottom-full mb-1 w-[32px] h-[22px] ${item.color} flex items-center justify-center text-white text-[12px] font-bold rounded-t shadow-xl ${wallShadow} z-20 border-x border-t border-white/50 animate-pulse">W</div>`
+                            : `<div class="absolute top-full mt-1 w-[32px] h-[22px] ${item.color} flex items-center justify-center text-white text-[12px] font-bold rounded-b shadow-xl ${wallShadow} z-20 border-x border-b border-white/50 animate-pulse">W</div>`;
+                        parentWidthStyle = `width: 32px;`; 
+                        fillClasses = `${item.color} opacity-95 border-x border-white/30`;
+                    } else { 
+                        parentWidthStyle = `width: calc(${100 / numBins}% + 1px);`; 
+                        fillClasses = `${item.color} opacity-80`;
+                    }
+
+                    const itemId = `${item.type.replace(/\s+/g, '_')}_${item.price}`;
+                    const isPinned = state.pinned && state.id === itemId;
+                    const isWall = item.isWall;
+                    const wallBorderColor = item.color === 'bg-[#22ab94]' ? 'border-[#22ab94]' : 'border-[#f23645]';
+                    
+                    
+                    let activeClasses = 'hidden group-hover:block border-[#2a2e39] z-[100]';
+                    if (isPinned) {
+                        activeClasses = '!block border-[#FFD700] z-[200]';
+                    } else if (isWall) {
+                        activeClasses = `!block ${wallBorderColor} z-[150]`;
+                    }
+
+                    const pinnedBadge = isPinned ? '<div class="hm-pinned-text text-[9px] text-[#FFD700] mt-1.5 bg-[#FFD700]/10 py-0.5 rounded animate-pulse border border-[#FFD700]/30 text-center">📌 Pinned</div>' : '';
+                    const wallBadge = (isWall && !isPinned) ? `<div class="text-[9px] ${textColor} mt-1.5 bg-black/40 py-0.5 rounded border border-[#2a2e39] text-center uppercase animate-pulse">🔥 Active Wall</div>` : '';
+
+                    combinedHtml += `
+                        <div class="absolute flex flex-col items-center ${flexAlign} group cursor-crosshair hover:z-[60]" 
+                             style="left: ${leftPct}%; transform: translateX(-50%); ${positionCss} z-10; ${parentWidthStyle}"
+                             onclick="handleHmClick('${asset}', '${itemId}')">
+                             
+                            <div id="hm-tt-${asset}-${itemId}" 
+                                 data-is-wall="${isWall}" 
+                                 data-wall-border="${wallBorderColor}" 
+                                 class="hm-tt-${asset} ${activeClasses} absolute ${tooltipPosition} ${tooltipHorizontalClass} bg-[#1e222d]/95 backdrop-blur-md border text-white text-[10px] p-2.5 rounded-lg whitespace-nowrap shadow-[0_0_20px_rgba(0,0,0,0.8)] transition-colors duration-200">
+                                <span class="${textColor} font-bold text-xs uppercase tracking-wider">${item.type}</span><br>
+                                <div class="my-1.5 h-[1px] bg-[#2a2e39] w-full"></div>
+                                <div class="flex justify-between gap-4"><span class="text-[#787b86]">Price:</span> <span>${item.isBin ? '~' : ''}${formatMoney(item.price)}</span></div>
+                                <div class="flex justify-between gap-4"><span class="text-[#787b86]">Volume:</span> <span class="${textColor} font-bold">$${formatCompact(item.vol)}</span></div>
+                                ${pinnedBadge}
+                                ${wallBadge}
+                            </div>
+                            ${wallMarker}
+                            <div class="${fillClasses} group-hover:opacity-100 group-hover:bg-white transition-all ${roundedClass} shadow-[0_0_8px_${shadowColor}] h-full" style="width: 100%;"></div>
+                        </div>`;
+                });
+
+                const currentLeftPct = ((currentPrice - rangeMin) / (rangeMax - rangeMin)) * 100;
+                combinedHtml += `
+                    <div class="absolute top-0 bottom-0 flex flex-col justify-center items-center group cursor-crosshair z-40 pointer-events-none" style="left: ${currentLeftPct}%; width: 20px; transform: translateX(-50%);">
+                        <div class="w-[1px] h-full bg-[#FFD700] shadow-[0_0_10px_#FFD700] opacity-80"></div>
+                        <div class="absolute w-[8px] h-[8px] rounded-full bg-[#FFD700] shadow-[0_0_15px_#FFD700]"></div>
+                    </div>
+                </div>`;
+
+                combinedHtml += `
+                <div class="relative flex justify-between text-[10px] text-[#787b86] font-mono mt-2 px-1 shrink-0">
+                    <span class="text-[#f23645]">${formatMoney(rangeMin)} (-5%)</span>
+                    <span class="absolute left-1/2 -translate-x-1/2 text-[#FFD700] font-bold">${formatMoney(currentPrice)}</span>
+                    <span class="text-[#22ab94]">${formatMoney(rangeMax)} (+5%)</span>
+                </div>`;
+            } else {
+                combinedHtml = '<div class="h-full min-h-[192px] flex items-center justify-center flex-1"><p class="text-[10px] text-[#787b86] italic animate-pulse">Accumulating Data...</p></div>';
+            }
+            container.innerHTML = combinedHtml;
+        }
+
+        function initAssetUI(asset) {
+            const container = document.getElementById(`${asset}-container`);
+            container.innerHTML = `
+                <div id="${asset}-loading" class="absolute inset-0 z-50 flex items-center justify-center bg-[#0b0e14] bg-opacity-90 backdrop-blur-sm rounded-lg border border-[#2a2e39]">
+                    <div class="text-center">
+                        <div class="w-10 h-10 border-4 border-[#2962FF] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                        <p class="text-[#2962FF] font-bold text-xs tracking-widest uppercase animate-pulse">Aggregating Data...</p>
+                    </div>
+                </div>
+
+                <div class="hero-panel mb-8 sm:mb-12 p-6 sm:p-8">
+                    <div>
+                        <p class="text-[10px] text-[#787b86] uppercase tracking-wider mb-1">Live Price</p>
+                        <p id="${asset}-price" class="text-3xl lg:text-4xl font-bold text-white">$0.00</p>
+                        <div class="flex gap-3 sm:justify-start lg:justify-start mt-1">
+                            <span id="${asset}-main-pct-1h" class="text-[10px] sm:text-[11px] font-bold text-[#787b86]">1H: 0.00%</span>
+                            <span id="${asset}-main-pct-24h" class="text-[10px] sm:text-[11px] font-bold text-[#787b86]">24H: 0.00%</span>
+                        </div>
+                    </div>
+                    <div>
+                        <p class="text-[10px] text-[#787b86] uppercase tracking-wider mb-1">Market Trend (1H)</p>
+                        <p id="${asset}-trend-text" class="text-xl lg:text-2xl font-bold text-[#787b86] uppercase tracking-widest">NEUTRAL</p>
+                        <p id="${asset}-trend-sub" class="text-[10px] font-bold text-[#787b86] mt-1">Waiting for data...</p>
+                    </div>
+                    <div>
+                        <p class="text-[10px] text-[#787b86] uppercase tracking-wider mb-1">Funding Rate (8H)</p>
+                        <p id="${asset}-funding" class="text-2xl lg:text-3xl font-bold text-[#f8a13f]">0.0000%</p>
+                    </div>
+                    <div>
+                        <p class="text-[10px] text-[#787b86] uppercase tracking-wider mb-1">Open Interest</p>
+                        <p id="${asset}-oi-val" class="text-2xl lg:text-3xl font-bold text-white">0</p>
+                        <p id="${asset}-oi-pct" class="text-[10px] font-bold mt-1 text-[#787b86]">1H: 0.00%</p>
+                    </div>
+                </div>
+
+                <div class="bg-[#131722] p-6 sm:p-8 border border-[#2a2e39] rounded-lg shadow-md mb-8 sm:mb-12">
+                    <div class="flex justify-between items-center mb-2">
+                        <p class="text-[9px] sm:text-[10px] font-bold text-[#2962FF] uppercase">Fear (Shorts)</p>
+                        <p class="text-[9px] sm:text-[10px] font-bold text-[#f8a13f] uppercase">Greed (Longs)</p>
+                    </div>
+                    <div class="w-full h-3 sm:h-4 rounded-full overflow-hidden relative border border-[#2a2e39] bg-[#1e222d]">
+                        <div class="absolute inset-0 bg-gradient-to-r from-[#2962FF] via-[#787b86] to-[#f8a13f] opacity-60"></div>
+                        <div class="absolute left-1/2 top-0 bottom-0 w-[2px] bg-[#0b0e14] z-10"></div>
+                        <div id="${asset}-fg-pointer" class="absolute top-0 bottom-0 w-1.5 sm:w-2 bg-white shadow-[0_0_8px_white] transition-all duration-700 z-20 rounded-full" style="left: 50%; transform: translateX(-50%);"></div>
+                    </div>
+                    <div class="text-center mt-3">
+                        <span id="${asset}-fg-text" class="text-[10px] sm:text-[11px] font-mono font-bold text-white">Index: 50 / 100 (Neutral)</span>
+                    </div>
+                </div>
+
+                <div class="metrics-grid mb-8 sm:mb-12">
+                    ${['1h', '6h', '12h', '24h'].map(tf => `
+                    <div class="bg-[#131722] p-5 sm:p-6 border border-[#2a2e39] rounded-lg shadow-md">
+                        <div class="flex justify-between items-center mb-3 sm:mb-4 pb-2 sm:pb-3 border-b border-[#2a2e39]">
+                            <span class="text-[10px] sm:text-xs font-bold text-white uppercase">${tf.replace('h', ' Hour' + (tf==='1h'?'':'s'))}</span>
+                        </div>
+                        <div class="space-y-2 sm:space-y-3 text-[10px] sm:text-[11px] font-mono">
+                            <div class="flex justify-between"><span class="text-[#787b86]">Vol:</span> <span id="${asset}-vol-${tf}" class="text-white">$0</span></div>
+                            <div class="flex justify-between"><span class="text-[#787b86]">CVD:</span> <span id="${asset}-cvd-${tf}" class="text-white">$0</span></div>
+                            <div class="flex justify-between items-center"><span class="text-[#787b86] mr-2">Liq(L|S):</span> <div class="text-right whitespace-nowrap"><span id="${asset}-liql-${tf}" class="text-[#f23645]">$0</span> <span class="text-[#434651] mx-0.5">|</span> <span id="${asset}-liqs-${tf}" class="text-[#22ab94]">$0</span></div></div>
+                            <div class="flex justify-between"><span class="text-[#787b86]">Whales:</span> <span id="${asset}-whales-${tf}" class="text-white">0</span></div>
+                        </div>
+                    </div>
+                    `).join('')}
+                </div>
+
+                <div class="bg-[#131722] p-6 sm:p-8 border border-[#2a2e39] rounded-lg shadow-md mb-8 sm:mb-12">
+                    <h3 class="text-[10px] sm:text-xs font-bold text-white uppercase mb-4 sm:mb-6">Order Book Pressure</h3>
+                    ${getOBHtml(asset, 'live', 'Live Order Book')}
+                    <div class="h-[1px] bg-[#2a2e39] w-full my-4 sm:my-6"></div>
+                    ${getOBHtml(asset, '1h', 'Avg 1 Hour')}
+                    ${getOBHtml(asset, '24h', 'Avg 24 Hours')}
+                </div>
+
+                <div id="wrap-heatmap-${asset}" class="bg-[#131722] p-6 sm:p-8 border border-[#2a2e39] rounded-lg shadow-md mb-8 sm:mb-12 flex flex-col transition-all duration-300 min-w-0">
+                    <div class="flex justify-between items-start sm:items-center border-b border-[#2a2e39] pb-4 mb-5">
+                        <div class="flex-1"></div>
+                        <h2 class="text-xs sm:text-sm font-bold text-white uppercase tracking-wider text-center flex-1 whitespace-nowrap">
+                            Liquidity & Large Orders
+                        </h2>
+                        <div class="flex-1 flex justify-end">
+                            ${getExpandBtn(`wrap-heatmap-${asset}`)}
+                        </div>
+                    </div>
+                    <div class="chart-box flex-1 min-h-[384px] sm:min-h-[512px] flex flex-col">
+                        <h3 class="text-[10px] sm:text-xs font-bold text-[#787b86] uppercase tracking-wider mb-3 text-center flex flex-col sm:flex-row justify-center items-center gap-2 sm:gap-6 shrink-0">
+                            <div class="flex items-center gap-1"><span class="text-[#22ab94]">BIDS ⬆</span><span class="text-[#787b86]">/</span><span class="text-[#f23645]">L.LIQ ⬇</span></div>
+                            <span class="text-[#FFD700] mx-2 hidden sm:inline">| LIVE PRICE |</span>
+                            <div class="flex items-center gap-1"><span class="text-[#22ab94]">S.LIQ ⬆</span><span class="text-[#787b86]">/</span><span class="text-[#f23645]">ASKS ⬇</span></div>
+                        </h3>
+                        <div id="combined-heatmap-${asset}" class="w-full flex-1 flex flex-col min-h-[384px] sm:min-h-[512px]"></div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 sm:gap-12 mb-8 sm:mb-12 min-w-0">
+                    
+                    <div id="wrap-candles-${asset}" class="bg-[#131722] p-5 sm:p-6 border border-[#2a2e39] rounded-lg shadow-md flex flex-col min-w-0 transition-all duration-300">
+                        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3 sm:gap-0">
+                            <h3 class="text-[10px] sm:text-xs font-bold text-[#787b86] uppercase tracking-wider flex items-center">
+                                Price
+                                <div class="flex items-center">
+                                    ${getFitBtn(asset, 'candleChart')}
+                                    ${getExpandBtn(`wrap-candles-${asset}`)}
+                                </div>
+                            </h3>
+                            <div class="flex items-center gap-2 sm:gap-3 flex-wrap">
+                                <button onclick="toggleLineMode('${asset}')" id="btn-toggle-line-${asset}" class="px-2 py-1 text-[9px] font-bold text-[#787b86] bg-[#2a2e39] rounded transition-colors hidden sm:block">MODE: CANDLES</button>
+                                <button onclick="toggleWalls('${asset}')" id="btn-toggle-walls-${asset}" class="px-2 py-1 text-[9px] font-bold text-[#787b86] bg-[#2a2e39] rounded transition-colors">ORDERS: OFF</button>
+                                <div class="flex gap-1 bg-[#1e222d] p-0.5 rounded border border-[#2a2e39]">
+                                    <button onclick="setEmaPeriod('50')" id="btn-ema-50-${asset}" class="ema-btn px-2 py-0.5 text-[9px] font-bold text-[#787b86] rounded">50</button>
+                                    <button onclick="setEmaPeriod('200')" id="btn-ema-200-${asset}" class="ema-btn px-2 py-0.5 text-[9px] font-bold text-[#787b86] rounded">200</button>
+                                    <button onclick="setEmaPeriod('800')" id="btn-ema-800-${asset}" class="ema-btn px-2 py-0.5 text-[9px] font-bold text-[#f8a13f] bg-[#2a2e39] rounded">800</button>
+                                    <button onclick="setEmaPeriod('ALL')" id="btn-ema-ALL-${asset}" class="ema-btn px-2 py-0.5 text-[9px] font-bold text-[#787b86] rounded">ALL</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="chart-candles-${asset}" class="chart-box flex-1 min-h-[600px] sm:min-h-[850px]"></div>
+                    </div>
+
+                    <div class="flex flex-col gap-8 sm:gap-12 min-w-0">
+                        
+                        <div id="wrap-vol-profile-${asset}" class="bg-[#131722] p-5 sm:p-6 border border-[#2a2e39] rounded-lg shadow-md flex-none flex flex-col min-w-0 transition-all duration-300">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-[10px] sm:text-xs font-bold text-[#787b86] uppercase tracking-wider flex items-center">
+                                    Volume Profile
+                                </h3>
+                                ${getExpandBtn(`wrap-vol-profile-${asset}`)}
+                            </div>
+                            <div class="chart-box flex-1 min-h-[400px] sm:min-h-[500px] flex flex-col relative">
+                                <div id="combined-vol-profile-${asset}" class="w-full flex-1 flex min-h-0 relative bg-[#0b0e14]/50 border border-[#2a2e39] rounded shadow-inner overflow-hidden"></div>
+                            </div>
+                        </div>
+
+                        <div id="wrap-combined-liq-${asset}" class="bg-[#131722] p-5 sm:p-6 border border-[#2a2e39] rounded-lg shadow-md flex-none flex flex-col min-w-0 transition-all duration-300">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-[10px] sm:text-xs font-bold text-[#787b86] uppercase tracking-wider flex items-center">
+                                    Liquidations ${getFitBtn(asset, 'liqChart')}
+                                </h3>
+                                <div class="flex gap-1 bg-[#1e222d] p-0.5 rounded border border-[#2a2e39]">
+                                    <button onclick="toggleLiqMode('${asset}', 'GROSS')" id="btn-liq-GROSS-${asset}" class="px-2 py-0.5 text-[9px] font-bold text-[#f8a13f] bg-[#2a2e39] rounded shadow-[0_0_5px_#f8a13f]">GROSS</button>
+                                    <button onclick="toggleLiqMode('${asset}', 'NET')" id="btn-liq-NET-${asset}" class="px-2 py-0.5 text-[9px] font-bold text-[#787b86] rounded">NET</button>
+                                </div>
+                            </div>
+                            <div id="chart-liq-${asset}" class="chart-box flex-1 min-h-[200px] sm:min-h-[250px]"></div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <div class="border border-[#2a2e39] bg-[#0b0e14] p-6 sm:p-10 rounded-lg mb-12 shadow-lg">
+                    <div class="flex justify-center items-center mb-8 w-full">
+                        <div class="flex gap-1 overflow-x-auto hide-scrollbar bg-[#131722] p-1.5 rounded-lg border border-[#2a2e39]">
+                            ${EXCHANGES.map(ex => `
+                                <button onclick="setGlobalExchange('${ex}')" id="btn-global-${ex}-${asset}" class="${ex === 'GLOBAL' ? 'px-4 py-2 text-[10px] font-bold text-[#f8a13f] bg-[#2a2e39] rounded whitespace-nowrap shadow-md' : 'px-4 py-2 text-[10px] font-bold text-[#787b86] hover:bg-[#1e222d] rounded whitespace-nowrap transition-colors'}">${ex}</button>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 sm:gap-12 min-w-0">
+                    
+                    <div class="bg-[#131722] p-5 sm:p-6 border border-[#2a2e39] rounded-lg shadow-md flex flex-col min-w-0">
+                        <div class="flex-1 flex flex-col gap-6">
+                            
+                            <div id="wrap-oi-${asset}" class="border border-[#2a2e39] rounded p-3 sm:p-4 bg-[#0b0e14] min-w-0 flex flex-col transition-all duration-300">
+                                <div class="flex justify-between items-center mb-3">
+                                    <h3 class="text-[10px] sm:text-xs font-bold text-[#787b86] uppercase tracking-wider flex items-center">
+                                        Open Interest ${getFitBtn(asset, 'oiChart')}
+                                    </h3>
+                                    ${getExpandBtn(`wrap-oi-${asset}`)}
+                                </div>
+                                <div id="chart-oi-${asset}" class="chart-box flex-1 min-h-[180px] sm:min-h-[200px]"></div>
+                            </div>
+                            
+                            <div id="wrap-oi-delta-${asset}" class="border border-[#2a2e39] rounded p-3 sm:p-4 bg-[#0b0e14] min-w-0 flex flex-col transition-all duration-300">
+                                <div class="flex justify-between items-center mb-3">
+                                    <h3 class="text-[10px] sm:text-xs font-bold text-[#787b86] uppercase tracking-wider flex items-center">
+                                        OI Delta ${getFitBtn(asset, 'oiDeltaChart')}
+                                    </h3>
+                                    ${getExpandBtn(`wrap-oi-delta-${asset}`)}
+                                </div>
+                                <div id="chart-oi-delta-${asset}" class="chart-box flex-1 min-h-[180px] sm:min-h-[200px]"></div>
+                            </div>
+                            
+                            <div id="wrap-vol-${asset}" class="border border-[#2a2e39] rounded p-3 sm:p-4 bg-[#0b0e14] min-w-0 flex flex-col transition-all duration-300">
+                                <div class="flex justify-between items-center mb-3">
+                                    <h3 class="text-[10px] sm:text-xs font-bold text-[#787b86] uppercase tracking-wider flex items-center">
+                                        Volume ${getFitBtn(asset, 'volChart')}
+                                    </h3>
+                                    <div class="flex items-center gap-2">
+                                        <div class="flex gap-1 bg-[#1e222d] p-1 rounded border border-[#2a2e39]">
+                                            <button onclick="setVolMode('TOTAL')" id="btn-volmode-TOTAL-${asset}" class="px-3 py-1.5 text-[9px] font-bold text-[#f8a13f] bg-[#2a2e39] rounded whitespace-nowrap">TOTAL</button>
+                                            <button onclick="setVolMode('DELTA')" id="btn-volmode-DELTA-${asset}" class="px-3 py-1.5 text-[9px] font-bold text-[#787b86] rounded whitespace-nowrap">BAR DELTA</button>
+                                        </div>
+                                        ${getExpandBtn(`wrap-vol-${asset}`)}
+                                    </div>
+                                </div>
+                                <div id="chart-vol-${asset}" class="chart-box flex-1 min-h-[180px] sm:min-h-[200px]"></div>
+                            </div>
+                            
+                        </div>
+                    </div>
+
+                    <div class="bg-[#131722] p-5 sm:p-6 border border-[#2a2e39] rounded-lg shadow-md flex flex-col min-w-0">
+                        <div class="flex-1 flex flex-col gap-6">
+                            
+                            <div id="wrap-cvd-${asset}" class="border border-[#2a2e39] rounded p-3 sm:p-4 bg-[#0b0e14] min-w-0 flex flex-col transition-all duration-300">
+                                <div class="flex flex-col sm:flex-row justify-between items-center mb-3 gap-2">
+                                    <h3 class="text-[10px] sm:text-xs font-bold text-[#787b86] uppercase tracking-wider flex items-center">
+                                        Cumulative Vol Delta ${getFitBtn(asset, 'cvdChart')}
+                                    </h3>
+                                    <div class="flex gap-1 bg-[#1e222d] p-1 rounded border border-[#2a2e39]">
+                                        <button onclick="setCVDSession('24H')" id="btn-cvdses-24H-${asset}" class="px-2 py-1 text-[9px] font-bold text-[#f8a13f] bg-[#2a2e39] rounded whitespace-nowrap">24H</button>
+                                        <button onclick="setCVDSession('ASIA')" id="btn-cvdses-ASIA-${asset}" class="px-2 py-1 text-[9px] font-bold text-[#787b86] rounded whitespace-nowrap">ASIA</button>
+                                        <button onclick="setCVDSession('EU')" id="btn-cvdses-EU-${asset}" class="px-2 py-1 text-[9px] font-bold text-[#787b86] rounded whitespace-nowrap">EU</button>
+                                        <button onclick="setCVDSession('US')" id="btn-cvdses-US-${asset}" class="px-2 py-1 text-[9px] font-bold text-[#787b86] rounded whitespace-nowrap">US</button>
+                                    </div>
+                                </div>
+                                <div id="chart-cvd-${asset}" class="chart-box flex-1 min-h-[180px] sm:min-h-[200px]"></div>
+                            </div>
+                            
+                            <div id="wrap-fund-${asset}" class="border border-[#2a2e39] rounded p-3 sm:p-4 bg-[#0b0e14] min-w-0 flex flex-col transition-all duration-300">
+                                <div class="flex justify-between items-center mb-3">
+                                    <h3 class="text-[10px] sm:text-xs font-bold text-[#787b86] uppercase tracking-wider flex items-center">
+                                        Funding Rate (8H) ${getFitBtn(asset, 'fundChart')}
+                                    </h3>
+                                    ${getExpandBtn(`wrap-fund-${asset}`)}
+                                </div>
+                                <div id="chart-fund-${asset}" class="chart-box flex-1 min-h-[180px] sm:min-h-[200px]"></div>
+                            </div>
+                            
+                            <div id="wrap-div-${asset}" class="border border-[#2a2e39] rounded p-3 sm:p-4 bg-[#0b0e14] min-w-0 flex flex-col transition-all duration-300">
+                                <div class="flex justify-between items-center mb-3">
+                                    <div class="flex items-center">
+                                        <h3 class="text-[10px] sm:text-xs font-bold text-[#787b86] uppercase tracking-wider flex items-center">
+                                            Effort vs Result ${getFitBtn(asset, 'divChart')}
+                                        </h3>
+                                        <div class="relative group cursor-help ml-2 hidden sm:block">
+                                            <span class="text-[10px] text-[#2962FF] border-b border-dashed border-[#2962FF] pb-0.5">Legend (?)</span>
+                                            <div class="hidden group-hover:block absolute bottom-full right-0 mb-2 bg-[#1e222d] border border-[#2a2e39] text-[9px] text-white p-3 rounded shadow-2xl z-50 whitespace-nowrap">
+                                                <span class="text-[#22ab94] font-bold">GREEN:</span> Normal Buy<br>
+                                                <span class="text-[#f23645] font-bold">RED:</span> Normal Sell<br><br>
+                                                <span class="text-[#FFD700] font-bold">GOLD:</span> Bearish Absorption<br>
+                                                <span class="text-[#2962FF] font-bold">BLUE:</span> Bullish Absorption
+                                            </div>
+                                        </div>
+                                    </div>
+                                    ${getExpandBtn(`wrap-div-${asset}`)}
+                                </div>
+                                <div id="chart-div-${asset}" class="chart-box flex-1 min-h-[180px] sm:min-h-[200px]"></div>
+                            </div>
+                            
+                        </div>
+                    </div>
+                </div>
+                
+            `;
+
+            const chartBoxes = container.querySelectorAll('.chart-box');
+            chartBoxes.forEach(box => {
+                const parentWrap = box.closest('[id^="wrap-"]');
+                if (parentWrap) {
+                    const wm = document.createElement('div');
+                    wm.className = 'qtp-watermark';
+                    wm.innerText = 'qtp.life';
+                    box.appendChild(wm);
+                
+                    const btn = document.createElement('button');
+                    btn.onclick = () => toggleFullscreen(parentWrap.id);
+                    btn.className = 'absolute top-2 left-2 bg-[#1e222d]/80 border border-[#2a2e39] text-[#787b86] hover:bg-[#2962FF] hover:text-white p-2.5 rounded-lg transition-all z-40 backdrop-blur-sm shadow-lg cursor-pointer';
+                    btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" /></svg>`;
+                    box.appendChild(btn);
+                }
+            });
+        } 
+
+        function initCharts(asset) {
+            const candleContainer = document.getElementById(`chart-candles-${asset}`);
+            const liqContainer = document.getElementById(`chart-liq-${asset}`); 
+            
+            const oiContainer = document.getElementById(`chart-oi-${asset}`);
+            const oiDeltaContainer = document.getElementById(`chart-oi-delta-${asset}`);
+            const cvdContainer = document.getElementById(`chart-cvd-${asset}`);
+            const volContainer = document.getElementById(`chart-vol-${asset}`);
+            const divContainer = document.getElementById(`chart-div-${asset}`);
+            const fundContainer = document.getElementById(`chart-fund-${asset}`);
+
+            const chartConfig = {
+                layout: { textColor: '#787b86', background: { type: 'solid', color: 'transparent' } },
+                grid: { vertLines: { color: '#2a2e39', style: 1 }, horzLines: { color: '#2a2e39', style: 1 } },
+                timeScale: { timeVisible: true, secondsVisible: false, borderColor: '#2a2e39' },
+                rightPriceScale: { borderColor: '#2a2e39' },
+                handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false }
+            };
+
+            const customScale = { ...chartConfig, localization: { priceFormatter: formatCompact } };
+            const fundScale = { ...chartConfig, localization: { priceFormatter: (p) => p.toFixed(4) + '%' } };
+            const priceScale = { ...chartConfig, localization: { priceFormatter: (p) => p.toFixed(2) } };
+
+            chartsData[asset] = { activeWhalePrices: [], whaleLines: {}, currentCandle: null, pocLine: null, zoomStates: {} };
+
+            const candleChart = LightweightCharts.createChart(candleContainer, { ...priceScale });
+            const candleSeries = candleChart.addCandlestickSeries({ 
+                upColor: '#22ab94', downColor: '#f23645', borderVisible: false, wickUpColor: '#22ab94', wickDownColor: '#f23645',
+                autoscaleInfoProvider: (original) => {
+                    const res = original();
+                    if (res && res.priceRange && chartsData[asset].activeWhalePrices.length > 0 && wallsVisible[asset] && !lineMode[asset]) {
+                        let min = res.priceRange.minValue; let max = res.priceRange.maxValue;
+                        chartsData[asset].activeWhalePrices.forEach(p => { if (p < min) min = p; if (p > max) max = p; });
+                        const padding = (max - min) * 0.15;
+                        res.priceRange.minValue = min - padding; res.priceRange.maxValue = max + padding;
+                    }
+                    return res;
+                }
+            });
+
+            const simpleLineSeries = candleChart.addLineSeries({ color: '#ffffff', lineWidth: 2, visible: false });
+            const ema50Series = candleChart.addLineSeries({ color: '#2962FF', lineWidth: 1, title: 'EMA 50', visible: false });
+            const ema200Series = candleChart.addLineSeries({ color: '#f8a13f', lineWidth: 2, title: 'EMA 200', visible: false });
+            const ema800Series = candleChart.addLineSeries({ color: '#FFD700', lineWidth: 2, title: 'EMA 800', visible: true });
+
+            
+            const liqChart = LightweightCharts.createChart(liqContainer, { ...customScale });
+            const grossShortSeries = liqChart.addHistogramSeries({ color: '#22ab94', base: 0 }); 
+            const grossLongSeries = liqChart.addHistogramSeries({ color: '#f23645', base: 0 });
+            const netLiqSeries = liqChart.addHistogramSeries({ color: '#22ab94', base: 0 });
+            netLiqSeries.applyOptions({ visible: false }); 
+
+            const oiChart = LightweightCharts.createChart(oiContainer, { ...customScale });
+            const oiSeries = oiChart.addAreaSeries({ lineColor: '#9C27B0', topColor: 'rgba(156, 39, 176, 0.4)', bottomColor: 'rgba(156, 39, 176, 0.0)' });
+
+            const oiDeltaChart = LightweightCharts.createChart(oiDeltaContainer, { ...customScale });
+            const oiDeltaSeries = oiDeltaChart.addHistogramSeries({ color: '#22ab94', base: 0 });
+
+            const cvdChart = LightweightCharts.createChart(cvdContainer, { ...customScale });
+            const cvdSeries = cvdChart.addAreaSeries({ lineColor: '#2962FF', topColor: 'rgba(41, 98, 255, 0.4)', bottomColor: 'rgba(41, 98, 255, 0.0)' });
+
+            const volChart = LightweightCharts.createChart(volContainer, { ...customScale });
+            const volSeries = volChart.addHistogramSeries({ color: '#22ab94' });
+
+            const divChart = LightweightCharts.createChart(divContainer, { ...customScale });
+            const divSeries = divChart.addHistogramSeries({ color: '#22ab94', base: 0 });
+
+            const fundChart = LightweightCharts.createChart(fundContainer, { ...fundScale });
+            const fundSeries = fundChart.addHistogramSeries({ base: 0 });
+
+            chartsData[asset] = { 
+                ...chartsData[asset], candleChart, candleSeries, simpleLineSeries,
+                emaSeries: { '50': ema50Series, '200': ema200Series, '800': ema800Series },
+                liqChart, grossShortSeries, grossLongSeries, netLiqSeries,
+                oiChart, oiSeries, oiDeltaChart, oiDeltaSeries,
+                cvdChart, cvdSeries, volChart, volSeries, divChart, divSeries,
+                fundChart, fundSeries
+            };
+
+            const ro = new ResizeObserver(() => {
+                [
+                    { chart: candleChart, el: candleContainer },
+                    { chart: liqChart, el: liqContainer },
+                    { chart: oiChart, el: oiContainer },
+                    { chart: oiDeltaChart, el: oiDeltaContainer },
+                    { chart: cvdChart, el: cvdContainer },
+                    { chart: volChart, el: volContainer },
+                    { chart: divChart, el: divContainer },
+                    { chart: fundChart, el: fundContainer }
+                ].forEach(item => {
+                    if (item.el && item.el.clientWidth > 0) {
+                        item.chart.applyOptions({ width: item.el.clientWidth, height: item.el.clientHeight });
+                    }
+                });
+            });
+
+            ro.observe(document.getElementById('main-charts-area'));
+            [candleContainer, liqContainer, oiContainer, oiDeltaContainer, cvdContainer, volContainer, divContainer, fundContainer].forEach(c => {
+                if(c) ro.observe(c);
+            });
+        }
+
+        initAssetUI('BTC');
+        initAssetUI('ETH');
+
+        const savedKey = localStorage.getItem('quantum_api_key');
+        if (savedKey) document.getElementById('api-key-input').value = savedKey;
+
+       async function loadChartHistoryBackground(asset, key) {
+            try {
+                const res = await fetch(`${API_URL}${asset}USDT?api_key=${key}`);
+                const rawHistory = await res.json();
+                if (Array.isArray(rawHistory) && rawHistory.length > 0) {
+                    
+                    const history = rawHistory.sort((a, b) => a.time - b.time);
+
+                    const uniqueTimes = new Set();
+                    const formattedCandles = []; 
+                    const formattedPrice = [];
+                    const formattedLiq = []; 
+                    const formattedGrossShorts = [];
+                    const formattedGrossLongs = [];
+                    const tempPriceForEma = [];
+                    
+                    const allOI = {}; const allOIDelta = {}; const allFund = {}; const allCVD = {}; const allVol = {}; const allDiv = {};
+                    
+                    EXCHANGES.forEach(ex => {
+                        allOI[ex] = []; allOIDelta[ex] = []; allFund[ex] = [];
+                        allCVD[ex] = { '24H': [], 'ASIA': [], 'EU': [], 'US': [] };
+                        allDiv[ex] = { '24H': [], 'ASIA': [], 'EU': [], 'US': [] };
+                        allVol[ex] = { 
+                            '24H': { 'TOTAL': [], 'DELTA': [] }, 'ASIA': { 'TOTAL': [], 'DELTA': [] },
+                            'EU': { 'TOTAL': [], 'DELTA': [] }, 'US': { 'TOTAL': [], 'DELTA': [] }
+                        };
+                    });
+
+                    let prevCVD = {}; let prevOI = {};
+                    EXCHANGES.forEach(ex => {
+                        prevCVD[ex] = parseFloat(history[0][ex === 'GLOBAL' ? 'cvd' : `cvd_${ex.toLowerCase()}`]) || 0;
+                        prevOI[ex] = parseFloat(history[0][ex === 'GLOBAL' ? 'open_interest' : `oi_${ex.toLowerCase()}`]) || 0;
+                    });
+                    let prevPrice = parseFloat(history[0].price) || 0;
+
+                    history.forEach(p => {
+                        if (!uniqueTimes.has(p.time)) {
+                            let currentPrice = parseFloat(p.price);
+                            let priceDelta = 0;
+                            
+                            if (!isNaN(currentPrice) && currentPrice > 0) {
+                                tempPriceForEma.push({ time: p.time, value: currentPrice });
+                                formattedPrice.push({ time: p.time, value: currentPrice });
+                                priceDelta = currentPrice - prevPrice;
+                                formattedCandles.push({ time: p.time, open: prevPrice, high: Math.max(prevPrice, currentPrice), low: Math.min(prevPrice, currentPrice), close: currentPrice });
+                                prevPrice = currentPrice;
+                            }
+                            
+                            EXCHANGES.forEach(ex => {
+                                let oiKey = ex === 'GLOBAL' ? 'open_interest' : `oi_${ex.toLowerCase()}`;
+                                let fundKey = ex === 'GLOBAL' ? 'funding_global' : `funding_${ex.toLowerCase()}`;
+                                let cvdKey = ex === 'GLOBAL' ? 'cvd' : `cvd_${ex.toLowerCase()}`;
+                                let volKey = ex === 'GLOBAL' ? 'volume' : `vol_${ex.toLowerCase()}`;
+                                
+                                let currentOI = parseFloat(p[oiKey]) || 0;
+                                let oiDelta = currentOI - prevOI[ex];
+                                allOI[ex].push({ time: p.time, value: currentOI });
+                                allOIDelta[ex].push({ time: p.time, value: oiDelta, color: oiDelta >= 0 ? '#22ab94' : '#f23645' });
+                                prevOI[ex] = currentOI;
+
+                                if (p[fundKey] !== undefined) {
+                                    let fVal = parseFloat(p[fundKey]) || 0;
+                                    allFund[ex].push({ time: p.time, value: fVal, color: fVal >= 0 ? '#f8a13f' : '#2962FF' });
+                                }
+                                
+                                let currentCVD = parseFloat(p[cvdKey]) || 0; 
+                                let currentVol = Math.abs(parseFloat(p[volKey]) || 0); 
+                                
+                                allCVD[ex]['24H'].push({ time: p.time, value: currentCVD });
+                                
+                                const candleDelta = currentCVD - prevCVD[ex];
+                                const barColor = candleDelta >= 0 ? '#22ab94' : '#f23645';
+                                prevCVD[ex] = currentCVD;
+
+                                allVol[ex]['24H']['TOTAL'].push({ time: p.time, value: currentVol, color: barColor });
+                                allVol[ex]['24H']['DELTA'].push({ time: p.time, value: candleDelta, color: barColor });
+
+                                let divColor = '';
+                                if (candleDelta > 0 && priceDelta <= 0) divColor = '#FFD700'; 
+                                else if (candleDelta < 0 && priceDelta >= 0) divColor = '#2962FF'; 
+                                else if (candleDelta > 0 && priceDelta > 0) divColor = '#22ab94';  
+                                else divColor = '#f23645'; 
+
+                                allDiv[ex]['24H'].push({ time: p.time, value: candleDelta, color: divColor });
+                            });
+
+                            let lShort = parseFloat(p.liq_short) || 0; 
+                            let lLong = parseFloat(p.liq_long) || 0;
+                            let netLiq = lShort - lLong; 
+                            formattedLiq.push({ time: p.time, value: netLiq, color: netLiq >= 0 ? '#22ab94' : '#f23645' });
+                            formattedGrossShorts.push({ time: p.time, value: lShort, color: '#22ab94' });
+                            formattedGrossLongs.push({ time: p.time, value: -lLong, color: '#f23645' }); 
+
+                            uniqueTimes.add(p.time);
+                        }
+                    });
+
+                    const now = new Date();
+                    const getAnchorTime = (h, m) => {
+                        let d = new Date(); d.setUTCHours(h, m, 0, 0);
+                        if (d.getTime() > now.getTime()) d.setUTCDate(d.getUTCDate() - 1);
+                        return Math.floor(d.getTime() / 1000);
+                    };
+                    const tsASIA = getAnchorTime(0, 0);
+                    const tsEU = getAnchorTime(8, 0);
+                    const tsUS = getAnchorTime(13, 30);
+
+                    const cvdAnchors = {};
+                    EXCHANGES.forEach(ex => {
+                        cvdAnchors[ex] = { 'ASIA': {val: null, idx: 0}, 'EU': {val: null, idx: 0}, 'US': {val: null, idx: 0} };
+                        
+                        let idxASIA = allCVD[ex]['24H'].findIndex(p => p.time >= tsASIA);
+                        let idxEU = allCVD[ex]['24H'].findIndex(p => p.time >= tsEU);
+                        let idxUS = allCVD[ex]['24H'].findIndex(p => p.time >= tsUS);
+
+                        if(idxASIA !== -1) { cvdAnchors[ex]['ASIA'].val = allCVD[ex]['24H'][idxASIA].value; cvdAnchors[ex]['ASIA'].idx = idxASIA; }
+                        if(idxEU !== -1) { cvdAnchors[ex]['EU'].val = allCVD[ex]['24H'][idxEU].value; cvdAnchors[ex]['EU'].idx = idxEU; }
+                        if(idxUS !== -1) { cvdAnchors[ex]['US'].val = allCVD[ex]['24H'][idxUS].value; cvdAnchors[ex]['US'].idx = idxUS; }
+
+                        ['ASIA', 'EU', 'US'].forEach(s => {
+                            if (cvdAnchors[ex][s].val === null) { cvdAnchors[ex][s].val = allCVD[ex]['24H'][0]?.value || 0; cvdAnchors[ex][s].idx = 0; }
+                            const startIdx = cvdAnchors[ex][s].idx; const baseVal = cvdAnchors[ex][s].val;
+                            allCVD[ex][s] = allCVD[ex]['24H'].slice(startIdx).map(p => ({ time: p.time, value: p.value - baseVal }));
+                            allVol[ex][s]['TOTAL'] = allVol[ex]['24H']['TOTAL'].slice(startIdx);
+                            allVol[ex][s]['DELTA'] = allVol[ex]['24H']['DELTA'].slice(startIdx);
+                            allDiv[ex][s] = allDiv[ex]['24H'].slice(startIdx);
+                        });
+                    });
+
+                    formattedCandles.sort((a, b) => a.time - b.time); 
+                    formattedPrice.sort((a, b) => a.time - b.time); 
+                    formattedLiq.sort((a, b) => a.time - b.time); 
+                    formattedGrossShorts.sort((a, b) => a.time - b.time);
+                    formattedGrossLongs.sort((a, b) => a.time - b.time);
+
+                    if(formattedCandles.length > 0) {
+                        let volumeProfile = {}; let maxVolume = 0; let pocPrice = 0;
+                        const binSize = asset === 'BTC' ? 20 : 1; 
+                        formattedCandles.forEach((c, idx) => {
+                            let vol = allVol['GLOBAL']['24H']['TOTAL'][idx] ? Math.abs(allVol['GLOBAL']['24H']['TOTAL'][idx].value) : 0;
+                            let typicalPrice = (c.high + c.low + c.close) / 3;
+                            let bin = Math.round(typicalPrice / binSize) * binSize;
+                            if(!volumeProfile[bin]) volumeProfile[bin] = 0;
+                            volumeProfile[bin] += vol;
+                            if(volumeProfile[bin] > maxVolume) { maxVolume = volumeProfile[bin]; pocPrice = bin; }
+                        });
+                        if(pocPrice > 0) {
+                            if (chartsData[asset].pocLine) chartsData[asset].candleSeries.removePriceLine(chartsData[asset].pocLine);
+                            chartsData[asset].pocLine = chartsData[asset].candleSeries.createPriceLine({ price: pocPrice, color: '#D500F9', lineWidth: 2, lineStyle: LightweightCharts.LineStyle.Solid, axisLabelVisible: true, title: 'POC (24H)' });
+                        }
+                    }
+
+                    if(tempPriceForEma.length > 0) {
+                        const emas = { '50': [], '200': [], '800': [] };
+                        const k = { '50': 2/51, '200': 2/201, '800': 2/801 };
+                        let seeds = { '50': 0, '200': 0, '800': 0 };
+                        ['50', '200', '800'].forEach(period => {
+                            let sum = 0; let count = Math.min(parseInt(period), tempPriceForEma.length);
+                            for (let i = 0; i < count; i++) { sum += tempPriceForEma[i].value; }
+                            seeds[period] = sum / count;
+                        });
+                        let currentEmas = { '50': seeds['50'], '200': seeds['200'], '800': seeds['800'] };
+                        let markers = []; let prev50 = currentEmas['50']; let prev200 = currentEmas['200'];
+
+                        history.forEach(p => {
+                            let curP = parseFloat(p.price);
+                            if (curP) {
+                                ['50', '200', '800'].forEach(period => {
+                                    if (p[`ema${period}`] !== undefined && p[`ema${period}`] !== null) currentEmas[period] = parseFloat(p[`ema${period}`]);
+                                    else currentEmas[period] = (curP * k[period]) + (currentEmas[period] * (1 - k[period]));
+                                    emas[period].push({ time: p.time, value: currentEmas[period] });
+                                });
+                                if (prev50 < prev200 && currentEmas['50'] >= currentEmas['200']) markers.push({ time: p.time, position: 'belowBar', color: '#22ab94', shape: 'arrowUp', text: '50x200 UP' });
+                                else if (prev50 > prev200 && currentEmas['50'] <= currentEmas['200']) markers.push({ time: p.time, position: 'aboveBar', color: '#f23645', shape: 'arrowDown', text: '50x200 DOWN' });
+                                prev50 = currentEmas['50']; prev200 = currentEmas['200'];
+                            }
+                        });
+                        
+                        chartsData[asset].candleSeries.setData(formattedCandles); 
+                        chartsData[asset].simpleLineSeries.setData(formattedPrice);
+                        chartsData[asset].emaSeries['50'].setData(emas['50']);
+                        chartsData[asset].emaSeries['200'].setData(emas['200']);
+                        chartsData[asset].emaSeries['800'].setData(emas['800']);
+                        chartsData[asset].candleSeries.setMarkers(markers);
+                        chartsData[asset].lastClosedEmas = { ...currentEmas };
+                        chartsData[asset].crossState = { prev50: currentEmas['50'], prev200: currentEmas['200'] }; 
+                    }
+
+                    if(allCVD['GLOBAL']['24H'].length > 0) {
+                        chartsData[asset].allOI = allOI; chartsData[asset].allOIDelta = allOIDelta; chartsData[asset].allCVD = allCVD; 
+                        chartsData[asset].allVol = allVol; chartsData[asset].allDiv = allDiv; chartsData[asset].allFund = allFund; chartsData[asset].cvdAnchors = cvdAnchors;
+
+                        if(allOI['GLOBAL'].length > 0) chartsData[asset].oiSeries.setData(allOI['GLOBAL']);
+                        if(allOIDelta['GLOBAL'].length > 0) chartsData[asset].oiDeltaSeries.setData(allOIDelta['GLOBAL']);
+                        chartsData[asset].cvdSeries.setData(allCVD['GLOBAL']['24H']);
+                        chartsData[asset].volSeries.setData(allVol['GLOBAL']['24H']['TOTAL']);
+                        chartsData[asset].divSeries.setData(allDiv['GLOBAL']['24H']);
+                        
+                        chartsData[asset].netLiqSeries.setData(formattedLiq); 
+                        chartsData[asset].grossShortSeries.setData(formattedGrossShorts);
+                        chartsData[asset].grossLongSeries.setData(formattedGrossLongs);
+
+                        if(allFund['GLOBAL'].length > 0) chartsData[asset].fundSeries.setData(allFund['GLOBAL']); 
+                        lastChartTime[asset] = allCVD['GLOBAL']['24H'][allCVD['GLOBAL']['24H'].length - 1].time;
+                    }
+                }
+            } catch (e) { console.warn(`History fetch failed for ${asset}.`); }
+        }
+
+        function startTerminal() {
+            const key = document.getElementById('api-key-input').value.trim();
+            if (!key) { alert("Please enter your API Key!"); return; }
+            initCharts('BTC'); initCharts('ETH');
+            loadChartHistoryBackground('BTC', key); loadChartHistoryBackground('ETH', key);
+            connectWebSocket(key);
+        }
+
+        function updateOBBar(asset, suffix, bids, asks, imb) {
+            const total = bids + asks;
+            if (total > 0) {
+                const buyPct = (bids / total) * 100; const sellPct = 100 - buyPct;
+                const barEl = document.getElementById(`${asset}-ob-bar-${suffix}`);
+                if (barEl) barEl.style.width = `${buyPct}%`;
+                
+                if (suffix === '1h' || suffix === '24h') {
+                    const bidsTxt = document.getElementById(`${asset}-bids-txt-${suffix}`); const asksTxt = document.getElementById(`${asset}-asks-txt-${suffix}`); const imbTxt = document.getElementById(`${asset}-imb-txt-${suffix}`);
+                    if (bidsTxt) bidsTxt.textContent = `${buyPct.toFixed(1)}%`; if (asksTxt) asksTxt.textContent = `${sellPct.toFixed(1)}%`;
+                    if (imbTxt) imbTxt.textContent = buyPct >= sellPct ? `BIDS LEAD: +${Math.abs(buyPct - sellPct).toFixed(1)}%` : `ASKS LEAD: ${Math.abs(buyPct - sellPct).toFixed(1)}%`;
+                } else {
+                    const bidsTxt = document.getElementById(`${asset}-bids-txt-${suffix}`); const asksTxt = document.getElementById(`${asset}-asks-txt-${suffix}`); const imbTxt = document.getElementById(`${asset}-imb-txt-${suffix}`);
+                    if (bidsTxt) bidsTxt.textContent = formatMoney(bids); if (asksTxt) asksTxt.textContent = formatMoney(asks);
+                    if (imbTxt) imbTxt.textContent = imb > 0 ? `BIDS LEAD: +${formatCompact(imb)}` : `ASKS LEAD: ${formatCompact(Math.abs(imb))}`;
+                }
+            }
+        }
+function updateSubscriptionStatus(statusData) {
+            const badge = document.getElementById('sub-badge');
+            const icon = document.getElementById('sub-icon');
+            const label = document.getElementById('sub-label');
+            
+            if (!statusData || !statusData.type) {
+                badge.classList.add('hidden');
+                return;
+            }
+            
+            badge.classList.remove('hidden');
+            badge.classList.add('flex');
+            
+            
+            badge.className = "flex items-center bg-[#1e222d] border border-[#2a2e39] px-2 py-1 rounded text-[10px] font-bold tracking-wider";
+            
+            if (statusData.type === 'lifetime') {
+                icon.textContent = "🏆";
+                label.textContent = "PRO (Lifetime)";
+                badge.classList.add('border-[#FFD700]', 'text-[#FFD700]'); 
+            } else if (statusData.type === 'demo') {
+                icon.textContent = "⏱";
+                label.textContent = `DEMO (${statusData.timeLeft})`;
+                badge.classList.add('text-[#D500F9]'); 
+            } else if (statusData.type === 'subscription') {
+                icon.textContent = "⚡";
+                label.textContent = `PRO (${statusData.timeLeft} left)`;
+                
+                
+                if (statusData.isExpiringSoon) {
+                    badge.classList.add('border-[#f8a13f]', 'text-[#f8a13f]');
+                } else {
+                    badge.classList.add('border-[#2962FF]', 'text-[#2962FF]');
+                }
+            }
+        }
+        function connectWebSocket(key) {
+            if (activeWS) { activeWS.onclose = null; activeWS.close(); }
+            activeWS = new WebSocket(`${WS_URL}?api_key=${key}`);
+
+            activeWS.onopen = () => {
+                reconnectAttempts = 0; localStorage.setItem('quantum_api_key', key);
+                document.getElementById('auth-screen').style.display = 'none';
+                document.getElementById('status-dot').className = "w-2 h-2 rounded-full bg-[#22ab94] shadow-[0_0_8px_#22ab94]";
+                document.getElementById('status-text').textContent = "CONNECTED";
+                document.getElementById('status-text').className = "text-xs font-bold text-[#22ab94] uppercase tracking-wider hidden sm:inline";
+                if (reconnectTimeout) clearTimeout(reconnectTimeout);
+            };
+
+            activeWS.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    
+                    if (data.subscription_info) {
+                        updateSubscriptionStatus(data.subscription_info);
+                    }
+
+                    if (data.type === "whale_trade") {
+                        const assetKey = data.symbol.replace("USDT", "");
+                        addTapePrint(assetKey, data.price, data.usd_value, data.side, data.exchange);
+                        return;
+                    }
+
+                    ['BTC', 'ETH'].forEach(asset => {
+                        if (!data[asset] || data[asset] === "Loading...") { 
+                            const lEl = document.getElementById(`${asset}-loading`); if (lEl) lEl.style.display = 'flex'; 
+                            return; 
+                        }
+                        const lEl = document.getElementById(`${asset}-loading`); if (lEl) lEl.style.display = 'none';
+
+                        const live = data[asset].live || {};
+                        const stats1h = data[asset].last_1h || {};
+                        const stats24h = data[asset].last_24h || {};
+                        
+                        const priceEl = document.getElementById(`${asset}-price`);
+                        if(live.price && priceEl) { priceEl.textContent = formatMoney(live.price); }
+
+                        const WHALE_MIN_USD = 50000000; 
+                        const zones = ['close', 'mid', 'macro'];
+                        let currentScalePrices = [];
+                        
+                        const updateWhaleLine = (zone, type, price, vol, color, titleText) => {
+                            const lineKey = `${zone}_${type}`;
+                            let lineObj = chartsData[asset].whaleLines[lineKey];
+                            if (vol >= WHALE_MIN_USD) {
+                                const lineTitle = `${titleText} ${formatCompact(vol)}`;
+                                activeWhales[asset][lineKey] = { color: color, title: lineTitle, price: price };
+                                const displayColor = (wallsVisible[asset] && !lineMode[asset]) ? color : 'rgba(0,0,0,0)';
+                                const displayTitle = (wallsVisible[asset] && !lineMode[asset]) ? lineTitle : '';
+
+                                if (!lineObj) {
+                                    lineObj = chartsData[asset].candleSeries.createPriceLine({
+                                        price: price, color: displayColor, lineWidth: zone === 'macro' ? 3 : (zone === 'mid' ? 2 : 1),
+                                        lineStyle: zone === 'macro' ? LightweightCharts.LineStyle.Solid : LightweightCharts.LineStyle.Dashed,
+                                        axisLabelVisible: true, title: displayTitle
+                                    });
+                                    chartsData[asset].whaleLines[lineKey] = lineObj;
+                                } else {
+                                    lineObj.applyOptions({ price: price, color: displayColor, title: displayTitle });
+                                }
+                                if (zone === 'close') currentScalePrices.push(price);
+                            } else if (lineObj) {
+                                chartsData[asset].candleSeries.removePriceLine(lineObj);
+                                chartsData[asset].whaleLines[lineKey] = null;
+                                if (activeWhales[asset][lineKey]) delete activeWhales[asset][lineKey];
+                            }
+                        };
+                        
+                        zones.forEach(zone => {
+                            const pAsk = live[`whale_${zone}_ask_price`]; const vAsk = live[`whale_${zone}_ask_vol`];
+                            if (pAsk !== undefined) updateWhaleLine(zone, 'ask', pAsk, vAsk, 'rgba(242, 54, 69, 0.8)', `ASK ${zone.toUpperCase()}`); 
+                            const pBid = live[`whale_${zone}_bid_price`]; const vBid = live[`whale_${zone}_bid_vol`];
+                            if (pBid !== undefined) updateWhaleLine(zone, 'bid', pBid, vBid, 'rgba(34, 171, 148, 0.8)', `BID ${zone.toUpperCase()}`); 
+                        });
+                        chartsData[asset].activeWhalePrices = currentScalePrices;
+                                          
+                        if (live.price && data[asset].heatmap) { renderRealHeatmap(asset, data[asset].heatmap, live.price, live); }
+                        
+                        
+                        if (live.price && data[asset].vol_profile) { renderVolumeProfile(asset, data[asset].vol_profile, live.price); }
+
+                        ['1h', '6h', '12h', '24h'].forEach(tf => {
+                            const stats = data[asset][`last_${tf}`];
+                            if (stats) {
+                                const volEl = document.getElementById(`${asset}-vol-${tf}`);
+                                if(volEl) volEl.textContent = formatCompact(stats.total_volume_usd || 0);
+                                const cvdEl = document.getElementById(`${asset}-cvd-${tf}`);
+                                if(cvdEl) { cvdEl.textContent = formatCompact(stats.cvd_usd || 0); cvdEl.className = (stats.cvd_usd || 0) >= 0 ? 'text-[#22ab94]' : 'text-[#f23645]'; }
+                                const liqlEl = document.getElementById(`${asset}-liql-${tf}`);
+                                if(liqlEl) liqlEl.textContent = formatCompact(stats.liq_long_usd || 0);
+                                const liqsEl = document.getElementById(`${asset}-liqs-${tf}`);
+                                if(liqsEl) liqsEl.textContent = formatCompact(stats.liq_short_usd || 0);
+                                const whalesEl = document.getElementById(`${asset}-whales-${tf}`);
+                                if(whalesEl) whalesEl.textContent = stats.whale_trades_count || 0;
+                            }
+                        });
+
+                        if (live.ob_bids_usd !== undefined) updateOBBar(asset, 'live', live.ob_bids_usd, live.ob_asks_usd, live.ob_imbalance_usd);
+                        if (stats1h.avg_ob_bids !== undefined) updateOBBar(asset, '1h', stats1h.avg_ob_bids, stats1h.avg_ob_asks, stats1h.avg_ob_imb);
+                        if (stats24h.avg_ob_bids !== undefined) updateOBBar(asset, '24h', stats24h.avg_ob_bids, stats24h.avg_ob_asks, stats24h.avg_ob_imb);
+                        
+                        let pct1h = 0;
+                        if (data[asset].price_change) {
+                            pct1h = data[asset].price_change['1h_pct'] || 0; const p24 = data[asset].price_change['24h_pct'] || 0;
+                            const el1 = document.getElementById(`${asset}-main-pct-1h`); const el24 = document.getElementById(`${asset}-main-pct-24h`);
+                            if (el1) { el1.textContent = `1H: ${pct1h > 0 ? '+' : ''}${pct1h.toFixed(2)}%`; el1.className = `text-[10px] sm:text-[11px] font-bold ${pct1h >= 0 ? 'text-[#22ab94]' : 'text-[#f23645]'}`; }
+                            if (el24) { el24.textContent = `24H: ${p24 > 0 ? '+' : ''}${p24.toFixed(2)}%`; el24.className = `text-[10px] sm:text-[11px] font-bold ${p24 >= 0 ? 'text-[#22ab94]' : 'text-[#f23645]'}`; }
+                        }
+
+                        const cvd1h = stats1h.cvd_usd || 0;
+                        const trendEl = document.getElementById(`${asset}-trend-text`); const trendSub = document.getElementById(`${asset}-trend-sub`);
+                        if (trendEl && trendSub) {
+                            if (pct1h > 0 && cvd1h > 0) { trendEl.textContent = "STRONG BULL"; trendEl.className = "text-xl lg:text-2xl font-bold text-[#22ab94] uppercase tracking-widest"; trendSub.textContent = "Price ⬆ | Whales ⬆"; } 
+                            else if (pct1h < 0 && cvd1h < 0) { trendEl.textContent = "STRONG BEAR"; trendEl.className = "text-xl lg:text-2xl font-bold text-[#f23645] uppercase tracking-widest"; trendSub.textContent = "Price ⬇ | Whales ⬇"; } 
+                            else if (pct1h > 0 && cvd1h < 0) { trendEl.textContent = "WEAK BULL"; trendEl.className = "text-xl lg:text-2xl font-bold text-[#f8a13f] uppercase tracking-widest"; trendSub.textContent = "Price ⬆ | Whales ⬇"; } 
+                            else if (pct1h < 0 && cvd1h > 0) { trendEl.textContent = "WEAK BEAR"; trendEl.className = "text-xl lg:text-2xl font-bold text-[#f8a13f] uppercase tracking-widest"; trendSub.textContent = "Price ⬇ | Whales ⬆"; } 
+                            else { trendEl.textContent = "NEUTRAL"; trendEl.className = "text-xl lg:text-2xl font-bold text-[#787b86] uppercase tracking-widest"; trendSub.textContent = "Consolidating"; }
+                        }
+
+                        let rawFunding = live.global_funding_rate !== undefined ? live.global_funding_rate : live.funding_rate;
+                        if (rawFunding !== undefined && rawFunding !== null) {
+                            rawFunding = parseFloat(rawFunding); 
+                            if (!isNaN(rawFunding)) {
+                                const fEl = document.getElementById(`${asset}-funding`);
+                                if (fEl) { fEl.textContent = `${rawFunding.toFixed(4)}%`; fEl.className = `text-2xl lg:text-3xl font-bold ${rawFunding > 0 ? 'text-[#f8a13f]' : 'text-[#2962FF]'}`; }
+
+                                let fgValue = 50; let fundScore = (rawFunding / 0.05) * 15; fgValue += Math.max(-15, Math.min(15, fundScore));
+                                let currentCvd = stats1h.cvd_usd || 0; let cvdThreshold = asset.includes("BTC") ? 250000000 : 120000000; 
+                                let cvdScore = (currentCvd / cvdThreshold) * 20; fgValue += Math.max(-20, Math.min(20, cvdScore));
+                                let liqL = stats1h.liq_long_usd || 0; let liqS = stats1h.liq_short_usd || 0; let totalLiq = liqL + liqS;
+                                if (totalLiq > 200000) { let liqSkew = (liqS - liqL) / totalLiq; fgValue += liqSkew * 10; }
+                                let imb = live.ob_imbalance_usd || 0; let imbThreshold = asset.includes("BTC") ? 30000000 : 15000000;
+                                let imbScore = (imb / imbThreshold) * 5; fgValue += Math.max(-5, Math.min(5, imbScore));
+
+                                fgValue = Math.max(0, Math.min(100, fgValue)); 
+                                const fgPointer = document.getElementById(`${asset}-fg-pointer`); if (fgPointer) fgPointer.style.left = `${fgValue}%`;
+                                
+                                let fgStatus = "Neutral";
+                                if(fgValue >= 80) fgStatus = "Extreme Greed"; else if(fgValue >= 60) fgStatus = "Greed";
+                                else if(fgValue <= 20) fgStatus = "Extreme Fear"; else if(fgValue <= 40) fgStatus = "Fear";
+                                const fgText = document.getElementById(`${asset}-fg-text`);
+                                if (fgText) fgText.textContent = `Index: ${Math.round(fgValue)} / 100 (${fgStatus})`;
+                            }
+                        }
+
+                        if (live.global_open_interest !== undefined && live.price) {
+                            const oiUsd = live.global_open_interest * live.price;
+                            const oiValEl = document.getElementById(`${asset}-oi-val`); if (oiValEl) oiValEl.textContent = "$" + formatCompact(oiUsd);
+                            const oiPct = data[asset].oi_change_1h || 0; const oiEl = document.getElementById(`${asset}-oi-pct`);
+                            if (oiEl) { oiEl.textContent = `1H: ${oiPct > 0 ? '+' : ''}${oiPct.toFixed(2)}%`; oiEl.className = `text-[10px] font-bold mt-1 ${oiPct >= 0 ? 'text-[#22ab94]' : 'text-[#f23645]'}`; }
+                        }
+
+                        const currentMinute = Math.floor(Date.now() / 60000) * 60; 
+                        
+                        if (stats1h.cvd_usd !== undefined) {
+                            let currentCandleOpen = chartsData[asset].currentCandle ? chartsData[asset].currentCandle.open : live.price;
+                            let currentPriceDelta = live.price - currentCandleOpen;
+
+                            chartsData[asset].simpleLineSeries.update({ time: currentMinute, value: live.price });
+
+                            if (chartsData[asset].lastClosedEmas) {
+                                const liveEmas = {};
+                                ['50', '200', '800'].forEach(period => {
+                                    const kp = 2 / (parseInt(period) + 1);
+                                    if (chartsData[asset].currentCandle && chartsData[asset].currentCandle.time !== currentMinute) {
+                                        const lastClosePrice = chartsData[asset].currentCandle.close;
+                                        chartsData[asset].lastClosedEmas[period] = (lastClosePrice * kp) + (chartsData[asset].lastClosedEmas[period] * (1 - kp));
+                                    }
+                                    liveEmas[period] = (live.price * kp) + (chartsData[asset].lastClosedEmas[period] * (1 - kp));
+                                    chartsData[asset].emaSeries[period].update({ time: currentMinute, value: liveEmas[period] });
+                                });
+                            }
+
+                            let candle = chartsData[asset].currentCandle;
+                            if (!candle || candle.time !== currentMinute) { candle = { time: currentMinute, open: live.price, high: live.price, low: live.price, close: live.price }; } 
+                            else { candle.high = Math.max(candle.high, live.price); candle.low = Math.min(candle.low, live.price); candle.close = live.price; }
+                            chartsData[asset].currentCandle = candle; chartsData[asset].candleSeries.update(candle);
+
+                            EXCHANGES.forEach(ex => {
+                                let exValOI = (ex === 'GLOBAL') ? (live.global_open_interest * live.price) : ((live[ex === 'BINANCE' ? 'open_interest' : `${ex.toLowerCase()}_open_interest`] || 0) * live.price);
+                                if (isNaN(exValOI) || exValOI === undefined) exValOI = 0;
+                                
+                                let arrOI = chartsData[asset].allOI[ex];
+                                let arrOIDelta = chartsData[asset].allOIDelta[ex];
+
+                                if (arrOI && arrOI.length > 0) {
+                                    let prevMinuteOI = arrOI.length > 1 ? arrOI[arrOI.length - 2].value : arrOI[0].value;
+                                    if (arrOI[arrOI.length - 1].time === currentMinute) { arrOI[arrOI.length - 1].value = exValOI; } 
+                                    else { prevMinuteOI = arrOI[arrOI.length - 1].value; arrOI.push({ time: currentMinute, value: exValOI }); }
+
+                                    let oiDeltaVal = exValOI - prevMinuteOI;
+                                    let oiColor = oiDeltaVal >= 0 ? '#22ab94' : '#f23645';
+
+                                    if (arrOIDelta && arrOIDelta.length > 0) {
+                                        let deltaItem = { time: currentMinute, value: oiDeltaVal, color: oiColor };
+                                        if (arrOIDelta[arrOIDelta.length - 1].time === currentMinute) { arrOIDelta[arrOIDelta.length - 1] = deltaItem; } 
+                                        else { arrOIDelta.push(deltaItem); }
+                                        if (ex === activeGlobalExchange) chartsData[asset].oiDeltaSeries.update(deltaItem);
+                                    }
+                                    if (ex === activeGlobalExchange) chartsData[asset].oiSeries.update({ time: currentMinute, value: exValOI });
+                                }
+
+                                let currentWsCVD = ex === 'GLOBAL' ? stats1h.cvd_usd : (data[asset].last_1h[`cvd_${ex.toLowerCase()}`] || 0);
+                                let arrCVD = chartsData[asset].allCVD[ex]['24H'];
+                                let arrDiv = chartsData[asset].allDiv[ex];
+
+                                if (arrCVD && arrCVD.length > 0) {
+                                    let prevMinuteCVD = arrCVD.length > 1 ? arrCVD[arrCVD.length - 2].value : arrCVD[0].value;
+                                    
+                                    if (arrCVD[arrCVD.length - 1].time === currentMinute) {
+                                        arrCVD[arrCVD.length - 1].value = currentWsCVD;
+                                    } else {
+                                        prevMinuteCVD = arrCVD[arrCVD.length - 1].value;
+                                        arrCVD.push({ time: currentMinute, value: currentWsCVD });
+                                    }
+
+                                    let cvdDelta = currentWsCVD - prevMinuteCVD;
+                                    let divColor = '';
+                                    if (cvdDelta > 0 && currentPriceDelta <= 0) divColor = '#FFD700'; 
+                                    else if (cvdDelta < 0 && currentPriceDelta >= 0) divColor = '#2962FF'; 
+                                    else if (cvdDelta > 0 && currentPriceDelta > 0) divColor = '#22ab94'; 
+                                    else if (cvdDelta < 0 && currentPriceDelta < 0) divColor = '#f23645'; 
+                                    else divColor = '#787b86';
+
+                                    let divItem = { time: currentMinute, value: cvdDelta, color: divColor };
+
+                                    ['24H', 'ASIA', 'EU', 'US'].forEach(ses => {
+                                        if (arrDiv[ses] && arrDiv[ses].length > 0) {
+                                            if (arrDiv[ses][arrDiv[ses].length - 1].time === currentMinute) arrDiv[ses][arrDiv[ses].length - 1] = divItem;
+                                            else arrDiv[ses].push(divItem);
+                                        }
+                                    });
+
+                                    if (ex === activeGlobalExchange) chartsData[asset].divSeries.update(divItem);
+                                }
+                            });
+
+                            if (chartsData[asset].allFund) {
+                                const fundMap = { 'GLOBAL': live.global_funding_rate !== undefined ? parseFloat(live.global_funding_rate) : 0 };
+                                EXCHANGES.filter(e => e !== 'GLOBAL').forEach(ex => fundMap[ex] = live[ex === 'BINANCE' ? 'funding_rate' : `${ex.toLowerCase()}_funding_rate`] !== undefined ? parseFloat(live[ex === 'BINANCE' ? 'funding_rate' : `${ex.toLowerCase()}_funding_rate`]) : 0);
+                                let fVal = fundMap[activeGlobalExchange]; if (fVal === undefined || isNaN(fVal)) fVal = fundMap['GLOBAL'];
+                                chartsData[asset].fundSeries.update({ time: currentMinute, value: fVal, color: fVal >= 0 ? '#f8a13f' : '#2962FF' });
+                                
+                                EXCHANGES.forEach(ex => {
+                                    let exVal = fundMap[ex]; if (exVal === undefined || isNaN(exVal)) exVal = fundMap['GLOBAL'];
+                                    let arr = chartsData[asset].allFund[ex];
+                                    if (arr && arr.length > 0) {
+                                        let lastObj = arr[arr.length - 1];
+                                        if (lastObj.time === currentMinute) { lastObj.value = exVal; lastObj.color = exVal >= 0 ? '#f8a13f' : '#2962FF'; } 
+                                        else { arr.push({ time: currentMinute, value: exVal, color: exVal >= 0 ? '#f8a13f' : '#2962FF' }); }
+                                    }
+                                });
+                            }
+
+                            let liveLShort = stats1h.liq_short_usd || 0; let liveLLong = stats1h.liq_long_usd || 0; let liveNetLiq = liveLShort - liveLLong;
+                            chartsData[asset].netLiqSeries.update({ time: currentMinute, value: liveNetLiq, color: liveNetLiq >= 0 ? '#22ab94' : '#f23645' });
+                            chartsData[asset].grossShortSeries.update({ time: currentMinute, value: liveLShort, color: '#22ab94' });
+                            chartsData[asset].grossLongSeries.update({ time: currentMinute, value: -liveLLong, color: '#f23645' });
+
+                            const currentWsCVD = activeGlobalExchange === 'GLOBAL' ? stats1h.cvd_usd : (data[asset].last_1h[`cvd_${activeGlobalExchange.toLowerCase()}`] || 0);
+                            const currentWsVol = activeGlobalExchange === 'GLOBAL' ? stats1h.total_volume_usd : (data[asset].last_1h[`vol_${activeGlobalExchange.toLowerCase()}`] || 0);
+                            
+                            if (chartsData[asset].cvdAnchors) {
+                                const anchorVal = activeCVDSession === '24H' ? 0 : (chartsData[asset].cvdAnchors[activeGlobalExchange][activeCVDSession].val || 0);
+                                chartsData[asset].cvdSeries.update({ time: currentMinute, value: currentWsCVD - anchorVal });
+                            }
+
+                            let activeArrCVD = chartsData[asset].allCVD[activeGlobalExchange]['24H'];
+                            let prevMinCVD = activeArrCVD.length > 1 ? activeArrCVD[activeArrCVD.length - 2].value : 0;
+                            let realMinuteDelta = currentWsCVD - prevMinCVD;
+
+                            const barColor = realMinuteDelta >= 0 ? '#22ab94' : '#f23645';
+                            const finalVolVal = activeVolMode === 'TOTAL' ? currentWsVol : Math.abs(realMinuteDelta);
+                            
+                            chartsData[asset].volSeries.update({ time: currentMinute, value: finalVolVal, color: barColor });
+
+                            let volArrTotal = chartsData[asset].allVol[activeGlobalExchange]['24H']['TOTAL'];
+                            let volArrDelta = chartsData[asset].allVol[activeGlobalExchange]['24H']['DELTA'];
+                            if (volArrTotal && volArrTotal.length > 0) {
+                                if (volArrTotal[volArrTotal.length - 1].time === currentMinute) {
+                                    volArrTotal[volArrTotal.length - 1] = { time: currentMinute, value: currentWsVol, color: barColor };
+                                    volArrDelta[volArrDelta.length - 1] = { time: currentMinute, value: realMinuteDelta, color: barColor };
+                                } else {
+                                    volArrTotal.push({ time: currentMinute, value: currentWsVol, color: barColor });
+                                    volArrDelta.push({ time: currentMinute, value: realMinuteDelta, color: barColor });
+                                }
+                            }
+
+                            lastWsCVD[asset] = currentWsCVD; lastChartTime[asset] = currentMinute;
+                        }
+                    });
+                } catch (e) { console.error("Parse Error", e); }
+            };
+
+            activeWS.onclose = (e) => {
+                if (e.code === 1008) return; reconnectAttempts++; if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) return;
+                let delay = Math.floor(Math.min(30000, Math.pow(1.5, reconnectAttempts) * 1000) + Math.random() * 1000);
+                reconnectTimeout = setTimeout(() => { connectWebSocket(key); }, delay);
+            };
+            activeWS.onerror = (err) => { activeWS.close(); };
+        }
+
+        function addTapePrint(asset, price, size, side, exchange) {
+            if(asset !== currentAsset || !price || size < minTapeValue) return;
+            const tape = document.getElementById('live-tape'); const isBuy = side === "BUY"; const row = document.createElement('div');
+            const bgClass = size >= 1000000 ? (isBuy ? 'bg-[#22ab94]/40' : 'bg-[#f23645]/40') : (isBuy ? 'bg-[#22ab94]/20' : 'bg-[#f23645]/20');
+            row.className = `tape-row flex items-center justify-between p-1.5 rounded border-l-2 ${isBuy ? 'border-[#22ab94]' : 'border-[#f23645]'} ${bgClass}`;
+            row.innerHTML = `<span class="text-[9px] ${isBuy ? 'text-[#22ab94]' : 'text-[#f23645]'} font-bold w-10">${side}</span> <span class="${isBuy ? 'text-[#22ab94]' : 'text-[#f23645]'} text-[10px] sm:text-xs">${formatMoney(price)}</span><span class="text-white font-bold text-[10px] sm:text-xs">${formatCompact(size)}</span>`;
+            tape.prepend(row); if(tape.children.length > 50) tape.lastChild.remove();
+        }
+    </script>
+
+</body>
+</html>
